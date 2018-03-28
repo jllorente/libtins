@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,65 +27,68 @@
  *
  */
 
-#include <stdexcept>
 #include <cstring>
-#include "sll.h"
-#include "internals.h"
-#include "exceptions.h"
+#include <tins/sll.h>
+#include <tins/exceptions.h>
+#include <tins/memory_helpers.h>
+#include <tins/detail/pdu_helpers.h>
+
+using Tins::Memory::InputMemoryStream;
+using Tins::Memory::OutputMemoryStream;
 
 namespace Tins {
-SLL::SLL() : _header() {
+
+SLL::SLL() : header_() {
     
 }
     
-SLL::SLL(const uint8_t *buffer, uint32_t total_sz) {
-    if(total_sz < sizeof(_header))
-        throw malformed_packet();
-    std::memcpy(&_header, buffer, sizeof(_header));
-    buffer += sizeof(_header);
-    total_sz -= sizeof(_header);
-    if(total_sz) {
+SLL::SLL(const uint8_t* buffer, uint32_t total_sz) {
+    InputMemoryStream stream(buffer, total_sz);
+    stream.read(header_);
+    if (stream) {
         inner_pdu(
             Internals::pdu_from_flag(
                 (Constants::Ethernet::e)protocol(), 
-                buffer, 
-                total_sz
+                stream.pointer(), 
+                stream.size()
             )
         );
     }
 }
 
 void SLL::packet_type(uint16_t new_packet_type) {
-    _header.packet_type = Endian::host_to_be(new_packet_type);
+    header_.packet_type = Endian::host_to_be(new_packet_type);
 }
 
 void SLL::lladdr_type(uint16_t new_lladdr_type) {
-    _header.lladdr_type = Endian::host_to_be(new_lladdr_type);
+    header_.lladdr_type = Endian::host_to_be(new_lladdr_type);
 }
 
 void SLL::lladdr_len(uint16_t new_lladdr_len) {
-    _header.lladdr_len = Endian::host_to_be(new_lladdr_len);
+    header_.lladdr_len = Endian::host_to_be(new_lladdr_len);
 }
 
-void SLL::address(const address_type &new_address) {
-    new_address.copy(_header.address);
+void SLL::address(const address_type& new_address) {
+    new_address.copy(header_.address);
 }
 
 void SLL::protocol(uint16_t new_protocol) {
-    _header.protocol = Endian::host_to_be(new_protocol);
+    header_.protocol = Endian::host_to_be(new_protocol);
 }
 
 uint32_t SLL::header_size() const {
-    return sizeof(_header);
+    return sizeof(header_);
 }
 
-void SLL::write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *) {
-    if(inner_pdu()) {
+void SLL::write_serialization(uint8_t* buffer, uint32_t total_sz) {
+    OutputMemoryStream stream(buffer, total_sz);
+    if (inner_pdu()) {
         Constants::Ethernet::e flag = Internals::pdu_flag_to_ether_type(
             inner_pdu()->pdu_type()
         );
         protocol(static_cast<uint16_t>(flag));
     }
-    std::memcpy(buffer, &_header, sizeof(_header));
+    stream.write(header_);
 }
-}
+
+} // Tins

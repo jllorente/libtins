@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,14 +32,16 @@
 
 #include <vector>
 #include <map>
-#include "pdu.h"
-#include "ip_address.h"
+#include <tins/pdu.h>
+#include <tins/macros.h>
+#include <tins/ip_address.h>
+#include <tins/ip.h>
 
 namespace Tins {
+
 /** 
  * \cond
  */
-class IP;
 namespace Internals {
 class IPv4Fragment {
 public:
@@ -48,13 +50,12 @@ public:
     IPv4Fragment() : offset_() { }
 
     template<typename T>
-    IPv4Fragment(T *pdu, uint16_t offset)
-    : payload_(pdu->serialize()), offset_(offset) 
-    {
+    IPv4Fragment(T* pdu, uint16_t offset)
+    : payload_(pdu->serialize()), offset_(offset) {
         
     }
     
-    const payload_type &payload() const {
+    const payload_type& payload() const {
         return payload_;
     }
     
@@ -66,23 +67,25 @@ private:
     uint16_t offset_;
 };
 
-class IPv4Stream {
+class TINS_API IPv4Stream {
 public:
     IPv4Stream();
     
-    void add_fragment(IP *ip);
+    void add_fragment(IP* ip);
     bool is_complete() const;
-    PDU *allocate_pdu() const;
+    PDU* allocate_pdu() const;
+    const IP& first_fragment() const;
 private:
     typedef std::vector<IPv4Fragment> fragments_type;
     
-    uint16_t extract_offset(const IP *ip);
-    bool extract_more_frag(const IP *ip);
+    uint16_t extract_offset(const IP* ip);
+    bool extract_more_frag(const IP* ip);
 
-    fragments_type fragments;
-    bool received_end;
-    uint8_t transport_proto;
-    size_t received_size, total_size;
+    fragments_type fragments_;
+    size_t received_size_;
+    size_t total_size_;
+    IP first_fragment_;
+    bool received_end_;
 };
 } // namespace Internals
 
@@ -92,32 +95,61 @@ private:
 
 /**
  * \brief Reassembles fragmented IP packets.
+ *
+ * This class is fairly simple: just feed packets into it using IPv4Reassembler::process.
+ * If the return value is IPv4Reassembler::FRAGMENTED, then the packet is fragmented
+ * and we haven't yet seen the missing fragments, hence we can't reassemble it.
+ * If the function returns either IPv4Reassembler::NOT_FRAGMENTED (meaning the
+ * packet wasn't fragmented) or IPv4Reassembler::REASSEMBLED (meaning the packet was
+ * fragmented but it's now reassembled), then you can process the packet normally.
+ *
+ * Simple example:
+ *
+ * \code
+ * IPv4Reassembler reassembler;
+ * Sniffer sniffer = ...;
+ * sniffer.sniff_loop([&](PDU& pdu) {
+ *     // Process it in any case, unless it's fragmented (and can't be reassembled yet)
+ *     if (reassembler.process(pdu) != IPv4Reassembler::FRAGMENTED) {
+ *         // Now actually process the packet
+ *         process_packet(pdu);
+ *     }
+ * });
+ * \endcode 
  */
-class IPv4Reassembler {
+class TINS_API IPv4Reassembler {
 public:
     /**
      * The status of each processed packet.
      */
-    enum packet_status {
-        NOT_FRAGMENTED,
-        FRAGMENTED,
-        REASSEMBLED
+    enum PacketStatus {
+        NOT_FRAGMENTED, ///< The given packet is not fragmented
+        FRAGMENTED, ///< The given packet is fragmented and can't be reassembled yet
+        REASSEMBLED ///< The given packet was fragmented but is now reassembled
+    };
+
+    TINS_DEPRECATED(typedef PacketStatus packet_status);
+
+    /**
+     * The type used to represent the overlapped segment reassembly 
+     * technique to be used.
+     */
+    enum OverlappingTechnique {
+        NONE 
     };
 
     /**
-     * The type used to represent the overlapped segment 
-     * reassembly technique to be used.
+     * Default constructor
      */
-    enum overlapping_technique {
-        NONE
-    };
+    IPv4Reassembler();
 
     /**
      * Constructs an IPV4Reassembler.
+     * 
      * \param technique The technique to be used for reassembling
      * overlapped fragments.
      */
-    IPv4Reassembler(overlapping_technique technique = NONE);
+    IPv4Reassembler(OverlappingTechnique technique);
 
     /**
      * \brief Processes a PDU and tries to reassemble it.
@@ -133,7 +165,7 @@ public:
      * fragmented or REASSEMBLED if the packet was fragmented 
      * but has now been reassembled.
      */
-    packet_status process(PDU &pdu);
+    PacketStatus process(PDU& pdu);
 
     /**
      * Removes all of the packets and data stored.
@@ -156,11 +188,11 @@ private:
     typedef std::pair<uint16_t, address_pair> key_type;
     typedef std::map<key_type, Internals::IPv4Stream> streams_type;
 
-    key_type make_key(const IP *ip) const;
+    key_type make_key(const IP* ip) const;
     address_pair make_address_pair(IPv4Address addr1, IPv4Address addr2) const;
     
-    streams_type streams;
-    overlapping_technique technique;
+    streams_type streams_;
+    OverlappingTechnique technique_;
 };
 
 /**
@@ -175,8 +207,7 @@ public:
      * \param func The functor object.
      */
     IPv4ReassemblerProxy(Functor func)
-    : functor_(func)
-    {
+    : functor_(func) {
 
     }
 
@@ -188,15 +219,17 @@ public:
      * \return true if the packet wasn't forwarded, otherwise
      * the value returned by the functor.
      */
-    bool operator()(PDU &pdu) {
+    bool operator()(PDU& pdu) {
         // Forward it unless it's fragmented.
-        if(reassembler.process(pdu) != IPv4Reassembler::FRAGMENTED)
+        if (reassembler_.process(pdu) != IPv4Reassembler::FRAGMENTED) {
             return functor_(pdu);
-        else
+        }
+        else {
             return true;
+        }
     }
 private:
-    IPv4Reassembler reassembler;
+    IPv4Reassembler reassembler_;
     Functor functor_;
 };
 
@@ -210,7 +243,7 @@ template<typename Functor>
 IPv4ReassemblerProxy<Functor> make_ipv4_reassembler_proxy(Functor func) {
     return IPv4ReassemblerProxy<Functor>(func);
 }
-}
 
+} // Tins
 
 #endif // TINS_IP_REASSEMBLER_H

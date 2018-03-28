@@ -5,6 +5,11 @@ configuration:
 platform: 
 - Win32
 - x64
+environment:
+  matrix:
+    - compiler: vs2013
+    - compiler: vs2015
+  BOOST_ROOT: C:/Libraries/boost
 clone_depth: 1
 install:
 - git clone https://github.com/mfontanini/winpcap-installer.git
@@ -18,8 +23,12 @@ install:
 before_build:
 - mkdir build
 - cd build
-- if "%platform%"=="x64" ( set GENERATOR="Visual Studio 12 Win64" ) else ( set GENERATOR="Visual Studio 12" )
-- cmake .. -G %GENERATOR% -DPCAP_ROOT_DIR=c:\WpdPack -DLIBTINS_BUILD_SHARED=0 -DLIBTINS_ENABLE_WPA2=0 -DLIBTINS_ENABLE_CXX11=1
+- if "%compiler%"=="vs2013" (set VS_VERSION=12) else (set VS_VERSION=14)
+- set VS=Visual Studio %VS_VERSION%
+- if "%platform%"=="Win32" (set GENERATOR="%VS%" & set ARCH_BITS=32)
+- if "%platform%"=="x64" (set GENERATOR="%VS% Win64" & set ARCH_BITS=64)
+- set BOOST_LIBRARYDIR=C:\Libraries\boost\lib%ARCH_BITS%-msvc-%VS_VERSION%.0
+- cmake .. -G %GENERATOR% -DPCAP_ROOT_DIR=c:\WpdPack -DLIBTINS_BUILD_SHARED=0 -DLIBTINS_ENABLE_WPA2=0 -DBOOST_ROOT="%BOOST_ROOT%" -DBOOST_LIBRARYDIR="%BOOST_LIBRARYDIR%" -DBoost_USE_STATIC_LIBS="ON"
 build:
   project: C:/projects/libtins/build/libtins.sln
   verbosity: minimal
@@ -34,11 +43,11 @@ after_build:
 - del include\tins\config.h.in
 - del include\tins\dot11\CMakeLists.txt
 - cd ..\
-- 7z a libtins-%platform%-%Configuration%.zip libtins
+- 7z a libtins-%compiler%-%platform%-%Configuration%.zip libtins
 test_script:
 - cd c:\projects\libtins\build
-- ctest -C %Configuration%
+- ctest -C %Configuration% -V
 deploy_script:
-- ps: Push-AppveyorArtifact "install\libtins-$env:Platform-$env:Configuration.zip"
+- ps: Push-AppveyorArtifact "install\libtins-$env:Compiler-$env:Platform-$env:Configuration.zip"
 skip_commits:
   message: /Update documentation.*/

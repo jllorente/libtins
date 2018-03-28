@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,7 +30,7 @@
 #ifndef TINS_IEEE802_3_H
 #define TINS_IEEE802_3_H
 
-#include "dot3.h"
+#include <tins/dot3.h>
 
 namespace Tins {
     typedef Dot3 IEEE802_3;

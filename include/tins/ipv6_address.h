@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,27 +31,19 @@
 #define TINS_IPV6_ADDRESS
 
 #include <string>
-#include <stdexcept>
+#include <iosfwd>
+#include <functional>
 #include <stdint.h>
-#include "cxxstd.h"
+#include <tins/cxxstd.h>
+#include <tins/macros.h>
 
 namespace Tins {
 
 /**
  * Represents an IPv6 address.
  */
-class IPv6Address {
+class TINS_API IPv6Address {
 public:
-    /**
-     * The exception thrown when a malformed address is parsed.
-     */
-    class malformed_address : public std::exception {
-    public:
-        const char *what() const throw() {
-            return "Malformed address";
-        }
-    };
-    
     static const size_t address_size = 16;
     
     /**
@@ -65,6 +57,13 @@ public:
     typedef const uint8_t* const_iterator;
 
     /**
+     * \brief Constructs an IPv6 address from a prefix length
+     *
+     * \param prefix_length The length of the prefix
+     */
+    static IPv6Address from_prefix_length(uint32_t prefix_length);
+
+    /**
      * \brief Default constructor.
      * Initializes this IPv6 address to "::"
      */
@@ -75,14 +74,14 @@ public:
      * \param addr The text representation from which to construct this
      * object.
      */
-    IPv6Address(const char *addr);
+    IPv6Address(const char* addr);
     
     /**
      * \brief Constructor from a text representation std::string.
      * \param addr The text representation from which to construct this
      * object.
      */
-    IPv6Address(const std::string &addr);
+    IPv6Address(const std::string& addr);
     
     /**
      * \brief Constructor from a buffer.
@@ -104,21 +103,21 @@ public:
      * Returns an iterator to the beginning of this address.
      */
     iterator begin() {
-        return address;
+        return address_;
     }
     
     /**
      * Returns a const iterator to the beginning of this address.
      */
     const_iterator begin() const {
-        return address;
+        return address_;
     }
     
     /**
      * Returns an iterator to the one-past-the-end element of this address.
      */
     iterator end() {
-        return address + address_size;
+        return address_ + address_size;
     }
     
     /**
@@ -126,7 +125,7 @@ public:
      * address.
      */
     const_iterator end() const {
-        return address + address_size;
+        return address_ + address_size;
     }
     
     /**
@@ -136,8 +135,8 @@ public:
      * 
      * \return bool indicating whether addresses are equal.
      */
-    bool operator==(const IPv6Address &rhs) const {
-        return std::equal(begin(), end(), rhs.address);
+    bool operator==(const IPv6Address& rhs) const {
+        return std::equal(begin(), end(), rhs.address_);
     }
     
     /**
@@ -147,7 +146,7 @@ public:
      * 
      * \return bool indicating whether addresses are distinct.
      */
-    bool operator!=(const IPv6Address &rhs) const {
+    bool operator!=(const IPv6Address& rhs) const {
         return !(*this == rhs);
     }
     
@@ -158,7 +157,7 @@ public:
      * 
      * \return bool indicating whether this address is less-than rhs.
      */
-    bool operator<(const IPv6Address &rhs) const {
+    bool operator<(const IPv6Address& rhs) const {
         return std::lexicographical_compare(begin(), end(), rhs.begin(), rhs.end());
     }
     
@@ -197,6 +196,15 @@ public:
      * ff00::/8, false otherwise.
      */
     bool is_multicast() const;
+
+    /**
+     * \brief Returns the size of an IPv6 Address.
+     *
+     * This returns the value of IPv6Address::address_size
+     */
+    size_t size() const {
+        return address_size;
+    }
     
     /**
      * \brief Writes this address in hex-notation to a std::ostream.
@@ -205,26 +213,39 @@ public:
      * \param addr The parameter to be written.
      * \return std::ostream& pointing to the os parameter.
      */
-    friend std::ostream &operator<<(std::ostream &os, const IPv6Address &addr) {
-        return os << addr.to_string();
-    }
-private:
-    void init(const char *addr);
+    TINS_API friend std::ostream& operator<<(std::ostream& os, const IPv6Address& addr);
 
-    uint8_t address[address_size];
+    /**
+     * Applies a mask to an address
+     */
+    TINS_API friend IPv6Address operator&(const IPv6Address& lhs, const IPv6Address& rhs);
+
+private:
+    void init(const char* addr);
+
+    uint8_t address_[address_size];
 };
-} //namespace Tins
+
+} // Tins
 
 #if TINS_IS_CXX11
-namespace std
-{
+namespace std {
+
 template<>
 struct hash<Tins::IPv6Address> {
-    size_t operator()(const Tins::IPv6Address &addr) const {
-        return std::hash<std::string>()(addr.to_string());
+    // Implementation taken from boost.functional
+    size_t operator()(const Tins::IPv6Address& addr) const {
+        std::size_t output = Tins::IPv6Address::address_size;
+        Tins::IPv6Address::const_iterator iter = addr.begin();
+        for (; iter != addr.end(); ++iter) {
+            output ^= *iter + 0x9e3779b9 + (output << 6) + (output >> 2);
+        }
+        return output;
     }
 };
-} // namespace std
-#endif
+
+} // std
+
+#endif // TINS_IS_CXX11
 
 #endif // TINS_IPV6_ADDRESS

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,19 +27,20 @@
  *
  */
 
-#include "../config.h"
+#include <tins/config.h>
 
-#if !defined(TINS_DOT11_DOT11_ASSOC_H) && defined(HAVE_DOT11)
+#if !defined(TINS_DOT11_DOT11_ASSOC_H) && defined(TINS_HAVE_DOT11)
 #define TINS_DOT11_DOT11_ASSOC_H
 
-#include "../dot11/dot11_mgmt.h"
+#include <tins/dot11/dot11_mgmt.h>
+#include <tins/macros.h>
 
 namespace Tins {
 /**
  * \brief Class representing a Disassociation frame in the IEEE 802.11 Protocol.
  *
  */
-class Dot11Disassoc : public Dot11ManagementFrame {
+class TINS_API Dot11Disassoc : public Dot11ManagementFrame {
 public:
    /**
      * \brief This PDU's flag.
@@ -55,8 +56,8 @@ public:
      * \param dst_hw_addr The destination hardware address.
      * \param src_hw_addr The source hardware address.
      */
-    Dot11Disassoc(const address_type &dst_hw_addr = address_type(), 
-                const address_type &src_hw_addr = address_type());
+    Dot11Disassoc(const address_type& dst_hw_addr = address_type(), 
+                  const address_type& src_hw_addr = address_type());
 
     /**
      * \brief Constructs a Dot11Disassoc object from a buffer and 
@@ -72,14 +73,16 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    Dot11Disassoc(const uint8_t *buffer, uint32_t total_sz);
+    Dot11Disassoc(const uint8_t* buffer, uint32_t total_sz);
 
     /**
      * \brief Getter for the reason code field.
      *
      * \return The stored reason code.
      */
-    uint16_t reason_code() const { return Endian::le_to_host(_body.reason_code); }
+    uint16_t reason_code() const {
+        return Endian::le_to_host(body_.reason_code);
+    }
 
     /**
      * \brief Setter for the reason code field.
@@ -100,10 +103,12 @@ public:
      * \brief Getter for the PDU's type.
      * \sa PDU::pdu_type
      */
-    PDUType pdu_type() const { return pdu_flag; }
+    PDUType pdu_type() const {
+        return pdu_flag;
+    }
 
     /**
-     * \brief Check wether this PDU matches the specified flag.
+     * \brief Check whether this PDU matches the specified flag.
      * \param flag The flag to match
      * \sa PDU::matches_flag
      */
@@ -116,24 +121,24 @@ public:
      *
      * \sa PDU::clone
      */
-    Dot11Disassoc *clone() const {
+    Dot11Disassoc* clone() const {
         return new Dot11Disassoc(*this);
     }
 private:
-    struct DisassocBody {
+    struct dot11_disassoc_body {
         uint16_t reason_code;
     };
 
-    uint32_t write_fixed_parameters(uint8_t *buffer, uint32_t total_sz);
+    void write_fixed_parameters(Memory::OutputMemoryStream& stream);
 
-    DisassocBody _body;
+    dot11_disassoc_body body_;
 };
 
 /**
  * \brief Class representing an Association Request frame in the IEEE 802.11 Protocol.
  *
  */
-class Dot11AssocRequest : public Dot11ManagementFrame {
+class TINS_API Dot11AssocRequest : public Dot11ManagementFrame {
 public:
     /**
      * \brief This PDU's flag.
@@ -149,8 +154,8 @@ public:
      * \param dst_hw_addr The destination hardware address.
      * \param src_hw_addr The source hardware address.
      */
-    Dot11AssocRequest(const address_type &dst_hw_addr = address_type(), 
-                    const address_type &src_hw_addr = address_type());
+    Dot11AssocRequest(const address_type& dst_hw_addr = address_type(), 
+                      const address_type& src_hw_addr = address_type());
 
     /**
      * \brief Constructs a Dot11AssocRequest object from a buffer 
@@ -166,7 +171,7 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    Dot11AssocRequest(const uint8_t *buffer, uint32_t total_sz);
+    Dot11AssocRequest(const uint8_t* buffer, uint32_t total_sz);
 
     /**
      * \brief Getter for the Capabilities Information.
@@ -174,7 +179,9 @@ public:
      * \return A constant refereence to the stored Capabilities 
      * Information field.
      */
-    const capability_information& capabilities() const { return _body.capability;}
+    const capability_information& capabilities() const {
+        return body_.capability;
+    }
 
     /**
      * \brief Getter for the Capabilities Information.
@@ -182,14 +189,18 @@ public:
      * \return A refereence to the stored Capabilities Information 
      * field.
      */
-    capability_information& capabilities() { return _body.capability;}
+    capability_information& capabilities() {
+        return body_.capability;
+    }
 
     /**
      * \brief Getter for the listen interval field.
      *
      * \return The stored listen interval field.
      */
-    uint16_t listen_interval() const { return Endian::le_to_host(_body.listen_interval); }
+    uint16_t listen_interval() const {
+        return Endian::le_to_host(body_.listen_interval);
+    }
 
     /**
      * \brief Setter for the listen interval field.
@@ -210,10 +221,12 @@ public:
      * \brief Getter for the PDU's type.
      * \sa PDU::pdu_type
      */
-    PDUType pdu_type() const { return pdu_flag; }
+    PDUType pdu_type() const {
+        return pdu_flag;
+    }
 
     /**
-     * \brief Check wether this PDU matches the specified flag.
+     * \brief Check whether this PDU matches the specified flag.
      * \param flag The flag to match
      * \sa PDU::matches_flag
      */
@@ -226,25 +239,25 @@ public:
      *
      * \sa PDU::clone
      */
-    Dot11AssocRequest *clone() const {
+    Dot11AssocRequest* clone() const {
         return new Dot11AssocRequest(*this);
     }
 private:
-    struct AssocReqBody {
+    struct dot11_assoc_request_body {
         capability_information capability;
         uint16_t listen_interval;
     };
 
-    uint32_t write_fixed_parameters(uint8_t *buffer, uint32_t total_sz);
+    void write_fixed_parameters(Memory::OutputMemoryStream& stream);
 
-    AssocReqBody _body;
+    dot11_assoc_request_body body_;
 };
 
 /**
  * \brief Class representing an Association Response frame in the IEEE 802.11 Protocol.
  *
  */
-class Dot11AssocResponse : public Dot11ManagementFrame {
+class TINS_API Dot11AssocResponse : public Dot11ManagementFrame {
 public:
     /**
      * \brief This PDU's flag.
@@ -260,8 +273,8 @@ public:
      * \param dst_hw_addr The destination hardware address.
      * \param src_hw_addr The source hardware address.
      */
-    Dot11AssocResponse(const address_type &dst_hw_addr = address_type(), 
-                        const address_type &src_hw_addr = address_type());
+    Dot11AssocResponse(const address_type& dst_hw_addr = address_type(), 
+                       const address_type& src_hw_addr = address_type());
 
     /**
      * \brief Constructor which creates a Dot11AssocResponse object 
@@ -277,7 +290,7 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    Dot11AssocResponse(const uint8_t *buffer, uint32_t total_sz);
+    Dot11AssocResponse(const uint8_t* buffer, uint32_t total_sz);
 
     /**
      * \brief Getter for the Capabilities Information field.
@@ -285,7 +298,9 @@ public:
      * \return A constant reference to the stored Capabilities 
      * Information field.
      */
-    const capability_information& capabilities() const { return _body.capability;}
+    const capability_information& capabilities() const {
+        return body_.capability;
+    }
 
     /**
      * \brief Getter for the Capabilities Information field.
@@ -293,21 +308,27 @@ public:
      * \return A reference to the stored Capabilities 
      * Information field.
      */
-    capability_information& capabilities() { return _body.capability;}
+    capability_information& capabilities() {
+        return body_.capability;
+    }
 
     /**
      * \brief Getter for the status code field.
      *
      * \return The stored status code.
      */
-    uint16_t status_code() const { return Endian::le_to_host(_body.status_code); }
+    uint16_t status_code() const {
+        return Endian::le_to_host(body_.status_code);
+    }
 
     /**
      * \brief Getter for the AID field.
      *
      * \return The stored AID field.
      */
-    uint16_t aid() const { return Endian::le_to_host(_body.aid); }
+    uint16_t aid() const {
+        return Endian::le_to_host(body_.aid);
+    }
 
     /**
      * \brief Setter for the status code.
@@ -335,10 +356,12 @@ public:
      * \brief Getter for the PDU's type.
      * \sa PDU::pdu_type
      */
-    PDUType pdu_type() const { return pdu_flag; }
+    PDUType pdu_type() const {
+        return pdu_flag;
+    }
 
     /**
-     * \brief Check wether this PDU matches the specified flag.
+     * \brief Check whether this PDU matches the specified flag.
      * \param flag The flag to match
      * \sa PDU::matches_flag
      */
@@ -351,26 +374,26 @@ public:
      *
      * \sa PDU::clone
      */
-    Dot11AssocResponse *clone() const {
+    Dot11AssocResponse* clone() const {
         return new Dot11AssocResponse(*this);
     }
 private:
-    struct AssocRespBody {
+    struct dot11_assoc_response_body {
         capability_information capability;
         uint16_t status_code;
         uint16_t aid;
     };
 
-    uint32_t write_fixed_parameters(uint8_t *buffer, uint32_t total_sz);
+    void write_fixed_parameters(Memory::OutputMemoryStream& stream);
 
-    AssocRespBody _body;
+    dot11_assoc_response_body body_;
 };
 
 /**
  * \brief Class representing an ReAssociation Request frame in the IEEE 802.11 Protocol.
  *
  */
-class Dot11ReAssocRequest : public Dot11ManagementFrame {
+class TINS_API Dot11ReAssocRequest : public Dot11ManagementFrame {
 public:
     /**
      * \brief This PDU's flag.
@@ -386,8 +409,8 @@ public:
      * \param dst_hw_addr The destination hardware address.
      * \param src_hw_addr The source hardware address.
      */
-    Dot11ReAssocRequest(const address_type &dst_hw_addr = address_type(), 
-                        const address_type &src_hw_addr = address_type());
+    Dot11ReAssocRequest(const address_type& dst_hw_addr = address_type(), 
+                        const address_type& src_hw_addr = address_type());
 
     /**
      * \brief Constructs a Dot11AssocRequest object from a buffer 
@@ -403,7 +426,7 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    Dot11ReAssocRequest(const uint8_t *buffer, uint32_t total_sz);
+    Dot11ReAssocRequest(const uint8_t* buffer, uint32_t total_sz);
 
     /**
      * \brief Getter for the Capabilities Information.
@@ -411,7 +434,9 @@ public:
      * \return A constant reference to the stored Capabilities 
      * Information field.
      */
-    const capability_information& capabilities() const { return _body.capability;}
+    const capability_information& capabilities() const {
+        return body_.capability;
+    }
 
     /**
      * \brief Getter for the Capabilities Information.
@@ -419,21 +444,27 @@ public:
      * \return A reference to the stored Capabilities Information 
      * field.
      */
-    capability_information& capabilities() { return _body.capability;}
+    capability_information& capabilities() {
+        return body_.capability;
+    }
 
     /**
      * \brief Getter for the listen interval field.
      *
      * \return The stored listen interval.
      */
-    uint16_t listen_interval() const { return Endian::le_to_host(_body.listen_interval); }
+    uint16_t listen_interval() const {
+        return Endian::le_to_host(body_.listen_interval);
+    }
 
     /**
      * \brief Getter for the current ap field.
      *
      * \return The current ap.
      */
-    address_type current_ap() const { return _body.current_ap; }
+    address_type current_ap() const {
+        return body_.current_ap;
+    }
 
     /**
      * \brief Setter for the listen interval field.
@@ -447,7 +478,7 @@ public:
      *
      * \param new_current_ap The address of the current ap.
      */
-    void current_ap(const address_type &new_current_ap);
+    void current_ap(const address_type& new_current_ap);
 
     /**
      * \brief Returns the frame's header length.
@@ -461,10 +492,12 @@ public:
      * \brief Getter for the PDU's type.
      * \sa PDU::pdu_type
      */
-    PDUType pdu_type() const { return pdu_flag; }
+    PDUType pdu_type() const {
+        return pdu_flag;
+    }
 
     /**
-     * \brief Check wether this PDU matches the specified flag.
+     * \brief Check whether this PDU matches the specified flag.
      * \param flag The flag to match
      * \sa PDU::matches_flag
      */
@@ -477,26 +510,26 @@ public:
      *
      * \sa PDU::clone
      */
-    Dot11ReAssocRequest *clone() const {
+    Dot11ReAssocRequest* clone() const {
         return new Dot11ReAssocRequest(*this);
     }
 private:
-    struct ReAssocReqBody {
+    struct dot11_reassoc_request_body {
         capability_information capability;
         uint16_t listen_interval;
         uint8_t current_ap[address_type::address_size];
     };
 
-    uint32_t write_fixed_parameters(uint8_t *buffer, uint32_t total_sz);
+    void write_fixed_parameters(Memory::OutputMemoryStream& stream);
 
-    ReAssocReqBody _body;
+    dot11_reassoc_request_body body_;
 };
 
 /**
  * \brief IEEE 802.11 ReAssociation Response frame.
  *
  */
-class Dot11ReAssocResponse : public Dot11ManagementFrame {
+class TINS_API Dot11ReAssocResponse : public Dot11ManagementFrame {
 public:
     /**
      * \brief This PDU's flag.
@@ -512,8 +545,8 @@ public:
      * \param dst_hw_addr The destination hardware address.
      * \param src_hw_addr The source hardware address.
      */
-    Dot11ReAssocResponse(const address_type &dst_hw_addr = address_type(), 
-                        const address_type &src_hw_addr = address_type());
+    Dot11ReAssocResponse(const address_type& dst_hw_addr = address_type(), 
+                         const address_type& src_hw_addr = address_type());
 
     /**
      * \brief Constructs a Dot11ReAssocResponse object from a buffer 
@@ -529,7 +562,7 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    Dot11ReAssocResponse(const uint8_t *buffer, uint32_t total_sz);
+    Dot11ReAssocResponse(const uint8_t* buffer, uint32_t total_sz);
 
     /**
      * \brief Getter for the Capabilities Information.
@@ -537,7 +570,9 @@ public:
      * \return A constant reference to the stored Capabilities 
      * Information field.
      */
-    const capability_information& capabilities() const { return _body.capability;}
+    const capability_information& capabilities() const {
+        return body_.capability;
+    }
 
     /**
      * \brief Getter for the Capabilities Information.
@@ -545,21 +580,27 @@ public:
      * \return A reference to the stored Capabilities Information 
      * field.
      */
-    capability_information& capabilities() { return _body.capability;}
+    capability_information& capabilities() {
+        return body_.capability;
+    }
 
     /**
      * \brief Getter for the status code field.
      *
      * \return The stored status code.
      */
-    uint16_t status_code() const { return Endian::le_to_host(_body.status_code); }
+    uint16_t status_code() const {
+        return Endian::le_to_host(body_.status_code);
+    }
 
     /**
      * \brief Getter for the AID field.
      *
      * \return The stored AID field value.
      */
-    uint16_t aid() const { return Endian::le_to_host(_body.aid); }
+    uint16_t aid() const {
+        return Endian::le_to_host(body_.aid);
+    }
 
     /**
      * \brief Setter for the status code field.
@@ -587,10 +628,12 @@ public:
      * \brief Getter for the PDU's type.
      * \sa PDU::pdu_type
      */
-    PDUType pdu_type() const { return pdu_flag; }
+    PDUType pdu_type() const {
+        return pdu_flag;
+    }
 
     /**
-     * \brief Check wether this PDU matches the specified flag.
+     * \brief Check whether this PDU matches the specified flag.
      * \param flag The flag to match
      * \sa PDU::matches_flag
      */
@@ -603,20 +646,21 @@ public:
      *
      * \sa PDU::clone
      */
-    Dot11ReAssocResponse *clone() const {
+    Dot11ReAssocResponse* clone() const {
         return new Dot11ReAssocResponse(*this);
     }
 private:
-    struct ReAssocRespBody {
+    struct dot11_reassoc_response_body {
         capability_information capability;
         uint16_t status_code;
         uint16_t aid;
     };
 
-    uint32_t write_fixed_parameters(uint8_t *buffer, uint32_t total_sz);
+    void write_fixed_parameters(Memory::OutputMemoryStream& stream);
 
-    ReAssocRespBody _body;
+    dot11_reassoc_response_body body_;
 };
+
 } // namespace Tins
 
 #endif // TINS_DOT11_DOT11_ASSOC_H

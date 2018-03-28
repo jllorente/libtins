@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,8 +27,7 @@
  *
  */
 
-#include <algorithm>
-#include "macros.h"
+#include <tins/macros.h>
 #ifndef _WIN32
     #include <arpa/inet.h>
     #ifdef BSD
@@ -38,65 +37,95 @@
     #include <ws2tcpip.h>
     #include <mstcpip.h>
 #endif
+#if TINS_IS_CXX11
+    // std::hash
+    #include <memory>
+#endif // TINS_IS_CXX11
 #include <limits>
 #include <sstream>
-#include "ipv6_address.h"
-#include "address_range.h"
+#include <iostream>
+#include <tins/ipv6_address.h>
+#include <tins/address_range.h>
+#include <tins/exceptions.h>
+
+using std::memset;
+using std::memcpy;
+using std::string;
+using std::ostream;
 
 namespace Tins {
+
 const IPv6Address loopback_address = "::1";
 const AddressRange<IPv6Address> multicast_range = IPv6Address("ff00::") / 8;
 
-IPv6Address::IPv6Address() {
-    std::fill(address, address + address_size, 0);
+IPv6Address IPv6Address::from_prefix_length(uint32_t prefix_length) {
+    IPv6Address address;
+    IPv6Address::iterator it = address.begin();
+    while (prefix_length > 8) {
+        *it = 0xff;
+        ++it;
+        prefix_length -= 8;
+    }
+    *it = 0xff << (8 - prefix_length);
+    return address;
 }
 
-IPv6Address::IPv6Address(const char *addr) {
+IPv6Address::IPv6Address() {
+    memset(address_, 0, address_size);
+}
+
+IPv6Address::IPv6Address(const char* addr) {
     init(addr);
 }
 
 IPv6Address::IPv6Address(const_iterator ptr) {
-    std::copy(ptr, ptr + address_size, address);
+    memcpy(address_, ptr, address_size);
 }
 
-IPv6Address::IPv6Address(const std::string &addr) {
+IPv6Address::IPv6Address(const std::string& addr) {
     init(addr.c_str());
 }
 
-void IPv6Address::init(const char *addr) {
+void IPv6Address::init(const char* addr) {
     #ifdef _WIN32
         // mingw on linux somehow doesn't have InetPton
         #ifdef _MSC_VER
-            if(InetPtonA(AF_INET6, addr, address) != 1)
-                throw malformed_address();
+            if (InetPtonA(AF_INET6, addr, address_) != 1) {
+                throw invalid_address();
+            }
         #else
             ULONG dummy1;
             USHORT dummy2;
             // Maybe change this, mingw doesn't have any other conversion function
-            if(RtlIpv6StringToAddressExA(addr, (IN6_ADDR*)address, &dummy1, &dummy2) != NO_ERROR)
-                throw malformed_address();
+            if (RtlIpv6StringToAddressExA(addr, (IN6_ADDR*)address_, &dummy1, &dummy2) != NO_ERROR) {
+                throw invalid_address();
+            }
         #endif
     #else
-        if(inet_pton(AF_INET6, addr, address) == 0)
-            throw malformed_address();
+        if (inet_pton(AF_INET6, addr, address_) == 0) {
+            throw invalid_address();
+        }
     #endif            
 }
 
-std::string IPv6Address::to_string() const {
+string IPv6Address::to_string() const {
     char buffer[INET6_ADDRSTRLEN];
     #ifdef _WIN32
         // mingw on linux somehow doesn't have InetNtop
         #ifdef _MSC_VER
-            if(InetNtopA(AF_INET6, (PVOID)address, buffer, sizeof(buffer)) == 0)
-                throw malformed_address();
+            if (InetNtopA(AF_INET6, (PVOID)address_, buffer, sizeof(buffer)) == 0) {
+                throw invalid_address();
+            }
         #else
             ULONG sz = sizeof(buffer);
-            if(RtlIpv6AddressToStringExA((const IN6_ADDR*)address, 0, 0, buffer, &sz) != NO_ERROR)
-                throw malformed_address();
+            if (RtlIpv6AddressToStringExA((const IN6_ADDR*)address_, 0, 0, buffer, &sz) != NO_ERROR) {
+                throw invalid_address();
+            }
         #endif
     #else
-        if(inet_ntop(AF_INET6, address, buffer, sizeof(buffer)) == 0)
-            throw malformed_address();
+        if (inet_ntop(AF_INET6, address_, buffer, sizeof(buffer)) == 0) {
+            throw invalid_address();
+        }
     #endif
     return buffer;
 }
@@ -108,5 +137,18 @@ bool IPv6Address::is_loopback() const {
 bool IPv6Address::is_multicast() const {
     return multicast_range.contains(*this);
 }
+
+ostream& operator<<(ostream& os, const IPv6Address& addr) {
+    return os << addr.to_string();
 }
 
+IPv6Address operator&(const IPv6Address& lhs, const IPv6Address& rhs) {
+    IPv6Address output = lhs;
+    IPv6Address::iterator addr_iter = output.begin();
+    for (IPv6Address::const_iterator it = rhs.begin(); it != rhs.end(); ++it, ++addr_iter) {
+        *addr_iter = *addr_iter & *it;
+    }
+    return output;
+}
+
+} // Tins

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,27 +27,31 @@
  *
  */ 
 
-#include "../config.h"
+#include <tins/config.h>
 
-#if !defined(TINS_DOT11_DOT11_H) && defined(HAVE_DOT11)
+#if !defined(TINS_DOT11_DOT11_H) && defined(TINS_HAVE_DOT11)
 #define TINS_DOT11_DOT11_H
 
-#include <list>
-#include "../pdu.h"
-#include "../pdu_option.h"
-#include "../small_uint.h"
-#include "../hw_address.h"
-#include "../endianness.h"
-#include "../cxxstd.h"
-#include "../macros.h"
+#include <tins/pdu.h>
+#include <tins/pdu_option.h>
+#include <tins/small_uint.h>
+#include <tins/hw_address.h>
+#include <tins/endianness.h>
+#include <tins/cxxstd.h>
+#include <tins/macros.h>
 
 namespace Tins {
+namespace Memory {
+class InputMemoryStream;
+class OutputMemoryStream;
+} // Memory
+
 class RSNInformation;
 
 /**
  * \brief Class representing an 802.11 frame.
  */
-class Dot11 : public PDU {
+class TINS_API Dot11 : public PDU {
 public:
     /**
      * The type used to store hardware addresses.
@@ -62,7 +66,7 @@ public:
     /**
      * The type used to store tagged options.
      */
-    typedef std::list<option> options_type;
+    typedef std::vector<option> options_type;
 
     /**
      * \brief This PDU's flag.
@@ -187,7 +191,7 @@ public:
      *
      * \param dst_hw_addr The destination hardware address.
      */
-    Dot11(const address_type &dst_hw_addr = address_type());
+    Dot11(const address_type& dst_hw_addr = address_type());
 
     /**
      * \brief Constructs 802.11 PDU from a buffer and adds all 
@@ -201,91 +205,124 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    Dot11(const uint8_t *buffer, uint32_t total_sz);
+    Dot11(const uint8_t* buffer, uint32_t total_sz);
 
     /**
      * \brief Getter for the protocol version field.
      *
      * \return The stored protocol version field.
      */
-    small_uint<2> protocol() const { return _header.control.protocol; }
+    small_uint<2> protocol() const {
+        return header_.control.protocol;
+    }
 
     /**
      * \brief Getter for the Type field.
      *
      * \return The stored Type field.
      */
-    small_uint<2> type() const { return _header.control.type; }
+    small_uint<2> type() const {
+        return header_.control.type;
+    }
 
     /**
      * \brief Getter for the Subtype field.
      *
      * \return The stored Subtype field.
      */
-    small_uint<4> subtype() const { return _header.control.subtype; }
+    small_uint<4> subtype() const {
+        return header_.control.subtype;
+    }
 
     /**
      * \brief Getter for the To-DS field.
      *
      * \return The stored To-DS field.
      */
-    small_uint<1> to_ds() const { return _header.control.to_ds; }
+    small_uint<1> to_ds() const {
+        return header_.control.to_ds;
+    }
 
     /**
      * \brief Getter for the From-DS field.
      *
      * \return The stored From-DS field.
      */
-    small_uint<1> from_ds() const { return _header.control.from_ds; }
+    small_uint<1> from_ds() const {
+        return header_.control.from_ds;
+    }
 
     /**
      * \brief Getter for the More-Frag field.
      *
      * \return The stored More-Frag field.
      */
-    small_uint<1> more_frag() const { return _header.control.more_frag; }
+    small_uint<1> more_frag() const {
+        return header_.control.more_frag;
+    }
 
     /**
      * \brief Getter for the Retry field.
      *
      * \return The stored Retry field.
      */
-    small_uint<1> retry() const { return _header.control.retry; }
+    small_uint<1> retry() const {
+        return header_.control.retry;
+    }
 
     /**
      * \brief Getter for the Power-Management field.
      *
      * \return The stored Power-Management field.
      */
-    small_uint<1> power_mgmt() const { return _header.control.power_mgmt; }
+    small_uint<1> power_mgmt() const {
+        return header_.control.power_mgmt;
+    }
+
+    /**
+     * \brief Getter for the More Data field.
+     *
+     * \return The stored More Data field.
+     */
+    small_uint<1> more_data() const {
+        return header_.control.more_data;
+    }
 
     /**
      * \brief Getter for the WEP field.
      *
      * \return The stored WEP field.
      */
-    small_uint<1> wep() const { return _header.control.wep; }
+    small_uint<1> wep() const {
+        return header_.control.wep;
+    }
 
     /**
      * \brief Getter for the Order field.
      *
      * \return The stored Order field.
      */
-    small_uint<1> order() const { return _header.control.order; }
+    small_uint<1> order() const {
+        return header_.control.order;
+    }
 
     /**
      * \brief Getter for the Duration-ID field.
      *
      * \return The stored Duration-ID field.
      */
-    uint16_t duration_id() const { return Endian::le_to_host(_header.duration_id); }
+    uint16_t duration_id() const {
+        return Endian::le_to_host(header_.duration_id);
+    }
 
     /**
      * \brief Getter for the first address.
      *
      * \return The stored first address.
      */
-    address_type addr1() const { return _header.addr1; }
+    address_type addr1() const {
+        return header_.addr1;
+    }
 
     // Setters
 
@@ -346,6 +383,13 @@ public:
     void power_mgmt(small_uint<1> new_value);
 
     /**
+     * \brief Setter for the More Data field.
+     *
+     * \param new_value The new More Data field value.
+     */
+    void more_data(small_uint<1> new_value);
+
+    /**
      * \brief Setter for the WEP field.
      *
      * \param new_value The new WEP field value.
@@ -371,7 +415,7 @@ public:
      *
      * \param new_addr1 The new first address.
      */
-    void addr1(const address_type &new_addr1);
+    void addr1(const address_type& new_addr1);
 
     /* Virtual methods */
     /**
@@ -386,14 +430,14 @@ public:
     /**
      * \sa PDU::send()
      */
-    void send(PacketSender &sender, const NetworkInterface &iface);
+    void send(PacketSender& sender, const NetworkInterface& iface);
     #endif // _WIN32
     
     /**
      * \brief Adds a new option to this Dot11 PDU.
      * \param opt The option to be added.
      */
-    void add_option(const option &opt);
+    void add_option(const option& opt);
     
     #if TINS_IS_CXX11
         /**
@@ -405,7 +449,7 @@ public:
          */
         void add_option(option &&opt) {
             internal_add_option(opt);
-            _options.push_back(std::move(opt));
+            options_.push_back(std::move(opt));
         }
     #endif
 
@@ -428,23 +472,25 @@ public:
      * \param type The option identifier.
      * \return The option found, or 0 if no such option has been set.
      */
-    const option *search_option(OptionTypes type) const;
+    const option* search_option(OptionTypes type) const;
 
     /**
      * \brief Getter for the PDU's type.
      * \sa PDU::pdu_type
      */
-    PDUType pdu_type() const { return pdu_flag; }
+    PDUType pdu_type() const {
+        return pdu_flag;
+    }
     
     /**
      * \sa PDU::clone
      */
-    Dot11 *clone() const {
+    Dot11* clone() const {
         return new Dot11(*this);
     }
 
     /**
-     * \brief Check wether this PDU matches the specified flag.
+     * \brief Check whether this PDU matches the specified flag.
      * \param flag The flag to match
      * \sa PDU::matches_flag
      */
@@ -457,7 +503,9 @@ public:
      * 
      * \return The options list.
      */
-    const options_type &options() const { return _options; }
+    const options_type& options() const {
+        return options_;
+    }
 
     /**
      * \brief Allocates an Dot11 PDU from a buffer.
@@ -473,18 +521,18 @@ public:
      * \param total_sz The total size of the buffer.
      * \return The allocated Dot11 PDU.
      */
-    static Dot11 *from_bytes(const uint8_t *buffer, uint32_t total_sz);
+    static Dot11* from_bytes(const uint8_t* buffer, uint32_t total_sz);
 protected:
-    virtual uint32_t write_ext_header(uint8_t *buffer, uint32_t total_sz) { return 0; }
-    virtual uint32_t write_fixed_parameters(uint8_t *buffer, uint32_t total_sz) { return 0; }
-    void parse_tagged_parameters(const uint8_t *buffer, uint32_t total_sz);
-    void add_tagged_option(OptionTypes opt, uint8_t len, const uint8_t *val);
+    virtual void write_ext_header(Memory::OutputMemoryStream& stream);
+    virtual void write_fixed_parameters(Memory::OutputMemoryStream& stream);
+    void parse_tagged_parameters(Memory::InputMemoryStream& stream);
+    void add_tagged_option(OptionTypes opt, uint8_t len, const uint8_t* val);
 protected:
     /**
      * Struct that represents the 802.11 header
      */
     TINS_BEGIN_PACK
-    struct ieee80211_header {
+    struct dot11_header {
         TINS_BEGIN_PACK
         struct {
         #if TINS_IS_LITTLE_ENDIAN
@@ -518,18 +566,19 @@ protected:
 
     } TINS_END_PACK;
 private:
-    Dot11(const ieee80211_header *header_ptr);
+    Dot11(const dot11_header* header_ptr);
     
-    void internal_add_option(const option &opt);
-    void write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *parent);
+    void internal_add_option(const option& opt);
+    void write_serialization(uint8_t* buffer, uint32_t total_sz);
     options_type::const_iterator search_option_iterator(OptionTypes type) const;
     options_type::iterator search_option_iterator(OptionTypes type);
 
 
-    ieee80211_header _header;
-    uint32_t _options_size;
-    options_type _options;
+    dot11_header header_;
+    uint32_t options_size_;
+    options_type options_;
 };
-}
+
+} // Tins
 
 #endif // TINS_DOT11_DOT11_H

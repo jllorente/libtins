@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,41 +27,37 @@
  *
  */
 
-#ifdef TINS_DEBUG
-#include <cassert>
-#endif
-#include <algorithm>
-#include "rawpdu.h"
+#include <tins/rawpdu.h>
+#include <tins/memory_helpers.h>
 
+using Tins::Memory::OutputMemoryStream;
 
 namespace Tins {
-RawPDU::RawPDU(const uint8_t *pload, uint32_t size) 
-: _payload(pload, pload + size) 
-{
+RawPDU::RawPDU(const uint8_t* pload, uint32_t size) 
+: payload_(pload, pload + size) {
     
 }
 
-RawPDU::RawPDU(const std::string &data) 
-: _payload(data.begin(), data.end()) {
+RawPDU::RawPDU(const std::string& data) 
+: payload_(data.begin(), data.end()) {
     
 }
 
 uint32_t RawPDU::header_size() const {
-    return static_cast<uint32_t>(_payload.size());
+    return static_cast<uint32_t>(payload_.size());
 }
 
-void RawPDU::write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *) {
-    #ifdef TINS_DEBUG
-    assert(total_sz >= _payload.size());
-    #endif
-    std::copy(_payload.begin(), _payload.end(), buffer);
+void RawPDU::write_serialization(uint8_t* buffer, uint32_t total_sz) {
+    OutputMemoryStream stream(buffer, total_sz);
+    stream.write(payload_.begin(), payload_.end());
 }
 
-void RawPDU::payload(const payload_type &pload) {
-    _payload = pload;
+void RawPDU::payload(const payload_type& pload) {
+    payload_ = pload;
 }
 
-bool RawPDU::matches_response(const uint8_t *ptr, uint32_t total_sz) const {
+bool RawPDU::matches_response(const uint8_t* /*ptr*/, uint32_t /*total_sz*/) const {
     return true;
 }
-}
+
+} // Tins

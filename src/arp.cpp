@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,122 +28,126 @@
  */
 
 #include <cstring>
-#include <cassert>
-#include <algorithm>
-#include "arp.h"
-#include "ip.h"
-#include "ethernetII.h"
-#include "rawpdu.h"
-#include "constants.h"
-#include "network_interface.h"
-#include "exceptions.h"
+#include <tins/arp.h>
+#include <tins/ethernetII.h>
+#include <tins/rawpdu.h>
+#include <tins/constants.h>
+#include <tins/exceptions.h>
+#include <tins/memory_helpers.h>
 
-
-using std::runtime_error;
+using Tins::Memory::InputMemoryStream;
+using Tins::Memory::OutputMemoryStream;
 
 namespace Tins {
 
-ARP::ARP(ipaddress_type target_ip, ipaddress_type sender_ip, 
-  const hwaddress_type &target_hw, const hwaddress_type &sender_hw) 
-{
-    memset(&_arp, 0, sizeof(arphdr));
+PDU::metadata ARP::extract_metadata(const uint8_t* /*buffer*/, uint32_t total_sz) {
+    if (TINS_UNLIKELY(total_sz < sizeof(arp_header))) {
+        throw malformed_packet();
+    }
+    return metadata(sizeof(arp_header), pdu_flag, PDU::UNKNOWN);
+}
+
+ARP::ARP(ipaddress_type target_ip, 
+         ipaddress_type sender_ip, 
+         const hwaddress_type& target_hw, 
+         const hwaddress_type& sender_hw) 
+: header_() {
     hw_addr_format((uint16_t)Constants::ARP::ETHER);
     prot_addr_format((uint16_t)Constants::Ethernet::IP);
     hw_addr_length(Tins::EthernetII::address_type::address_size);
-    prot_addr_length(Tins::IP::address_type::address_size);
+    prot_addr_length(4 /* IP address size */);
     sender_ip_addr(sender_ip);
     target_ip_addr(target_ip);
     sender_hw_addr(sender_hw);
     target_hw_addr(target_hw);
 }
 
-ARP::ARP(const uint8_t *buffer, uint32_t total_sz) 
-{
-    if(total_sz < sizeof(arphdr))
-        throw malformed_packet();
-    memcpy(&_arp, buffer, sizeof(arphdr));
-    total_sz -= sizeof(arphdr);
-    //TODO: Check whether this should be removed or not.
-    if(total_sz)
-        inner_pdu(new RawPDU(buffer + sizeof(arphdr), total_sz));
+ARP::ARP(const uint8_t* buffer, uint32_t total_sz) {
+    InputMemoryStream stream(buffer, total_sz);
+    stream.read(header_);
+    if (stream) {
+        inner_pdu(new RawPDU(stream.pointer(), stream.size()));
+    }
 }
 
-void ARP::sender_hw_addr(const hwaddress_type &new_snd_hw_addr) {
-    std::copy(new_snd_hw_addr.begin(), new_snd_hw_addr.end(), _arp.ar_sha);
+void ARP::sender_hw_addr(const hwaddress_type& address) {
+    address.copy(header_.sender_hw_address);
 }
 
-void ARP::sender_ip_addr(ipaddress_type new_snd_ip_addr) {
-    this->_arp.ar_sip = new_snd_ip_addr;
+void ARP::sender_ip_addr(ipaddress_type address) {
+    header_.sender_ip_address = address;
 }
 
-void ARP::target_hw_addr(const hwaddress_type &new_tgt_hw_addr) {
-    std::copy(new_tgt_hw_addr.begin(), new_tgt_hw_addr.end(), _arp.ar_tha);
+void ARP::target_hw_addr(const hwaddress_type& address) {
+    address.copy(header_.target_hw_address);
 }
 
-void ARP::target_ip_addr(ipaddress_type new_tgt_ip_addr) {
-    this->_arp.ar_tip = new_tgt_ip_addr;
+void ARP::target_ip_addr(ipaddress_type address) {
+    header_.target_ip_address = address;
 }
 
-void ARP::hw_addr_format(uint16_t new_hw_addr_fmt) {
-    this->_arp.ar_hrd = Endian::host_to_be(new_hw_addr_fmt);
+void ARP::hw_addr_format(uint16_t format) {
+    header_.hw_address_format = Endian::host_to_be(format);
 }
 
-void ARP::prot_addr_format(uint16_t new_prot_addr_fmt) {
-    this->_arp.ar_pro = Endian::host_to_be(new_prot_addr_fmt);
+void ARP::prot_addr_format(uint16_t format) {
+    header_.proto_address_format = Endian::host_to_be(format);
 }
 
-void ARP::hw_addr_length(uint8_t new_hw_addr_len) {
-    this->_arp.ar_hln = new_hw_addr_len;
+void ARP::hw_addr_length(uint8_t length) {
+    header_.hw_address_length = length;
 }
 
-void ARP::prot_addr_length(uint8_t new_prot_addr_len) {
-    this->_arp.ar_pln = new_prot_addr_len;
+void ARP::prot_addr_length(uint8_t length) {
+    header_.proto_address_length = length;
 }
 
-void ARP::opcode(Flags new_opcode) {
-    this->_arp.ar_op = Endian::host_to_be<uint16_t>(new_opcode);
+void ARP::opcode(Flags code) {
+    header_.opcode = Endian::host_to_be<uint16_t>(code);
 }
 
 uint32_t ARP::header_size() const {
-    return sizeof(arphdr);
+    return sizeof(header_);
 }
 
-void ARP::write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *) {
-    #ifdef TINS_DEBUG
-    assert(total_sz >= sizeof(arphdr));
-    #endif
-    memcpy(buffer, &_arp, sizeof(arphdr));
+void ARP::write_serialization(uint8_t* buffer, uint32_t total_sz) {
+    OutputMemoryStream stream(buffer, total_sz);
+    stream.write(header_);
 }
 
-bool ARP::matches_response(const uint8_t *ptr, uint32_t total_sz) const {
-    if(total_sz < sizeof(arphdr))
+bool ARP::matches_response(const uint8_t* ptr, uint32_t total_sz) const {
+    if (total_sz < sizeof(header_)) {
         return false;
-    const arphdr *arp_ptr = (const arphdr*)ptr;
-    return arp_ptr->ar_sip == _arp.ar_tip && arp_ptr->ar_tip == _arp.ar_sip;
+    }
+    const arp_header* arp_ptr = (const arp_header*)ptr;
+    return arp_ptr->sender_ip_address == header_.target_ip_address && 
+           arp_ptr->target_ip_address == header_.sender_ip_address;
 }
 
-EthernetII ARP::make_arp_request(ipaddress_type target, ipaddress_type sender, 
-const hwaddress_type &hw_snd) 
-{
-    /* Create ARP packet and set its attributes */
+EthernetII ARP::make_arp_request(ipaddress_type target, 
+                                 ipaddress_type sender, 
+                                 const hwaddress_type& hw_snd) {
+    // Create ARP packet and set its attributes
     ARP arp;
     arp.target_ip_addr(target);
     arp.sender_ip_addr(sender);
     arp.sender_hw_addr(hw_snd);
     arp.opcode(REQUEST);
 
-    /* Create the EthernetII PDU with the ARP PDU as its inner PDU */
+    // Create the EthernetII PDU with the ARP PDU as its inner PDU
     return EthernetII(EthernetII::BROADCAST, hw_snd) / arp;
 }
 
-EthernetII ARP::make_arp_reply(ipaddress_type target, ipaddress_type sender, 
-const hwaddress_type &hw_tgt, const hwaddress_type &hw_snd) 
-{
-    /* Create ARP packet and set its attributes */
+EthernetII ARP::make_arp_reply(ipaddress_type target, 
+                               ipaddress_type sender, 
+                               const hwaddress_type& hw_tgt, 
+                               const hwaddress_type& hw_snd)  {
+    // Create ARP packet and set its attributes
     ARP arp(target, sender, hw_tgt, hw_snd);
     arp.opcode(REPLY);
 
-    /* Create the EthernetII PDU with the ARP PDU as its inner PDU */
+    // Create the EthernetII PDU with the ARP PDU as its inner PDU
     return EthernetII(hw_tgt, hw_snd) / arp;
 }
-}
+
+} // Tins

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,15 +33,18 @@
 #include <string>
 #include <vector>
 #include <stdint.h>
-#include "hw_address.h"
-#include "ip_address.h"
+#include <tins/macros.h>
+#include <tins/hw_address.h>
+#include <tins/ip_address.h>
+#include <tins/ipv6_address.h>
 
 namespace Tins {
+
 /**
  * \class NetworkInterface
  * \brief Abstraction of a network interface
  */
-class NetworkInterface {
+class TINS_API NetworkInterface {
 public:
     /**
      * \brief The type used to store the interface's identifier.
@@ -54,10 +57,19 @@ public:
     typedef HWAddress<6> address_type;
     
     /**
+     *
+     */
+    struct IPv6Prefix {
+        IPv6Address address;
+        uint32_t prefix_length;
+    };
+
+    /**
      * \brief Struct that holds an interface's addresses.
      */
     struct Info {
         IPv4Address ip_addr, netmask, bcast_addr;
+        std::vector<IPv6Prefix> ipv6_addrs;
         address_type hw_addr;
         bool is_up;
     };
@@ -88,14 +100,14 @@ public:
      * 
      * \param name The name of the interface this object will abstract.
      */
-    NetworkInterface(const std::string &name);
+    NetworkInterface(const std::string& name);
     
     /**
      * \brief Constructor from const char*.
      * 
      * \param name The name of the interface this object will abstract.
      */
-    NetworkInterface(const char *name);
+    NetworkInterface(const char* name);
     
     /**
      * \brief Constructs a NetworkInterface from an ip address.
@@ -113,7 +125,7 @@ public:
      * \return id_type containing the identifier.
      */
     id_type id() const {
-        return iface_id;
+        return iface_id_;
     }
     
     /**
@@ -126,6 +138,26 @@ public:
      * \return std::string containing this interface's name.
      */
     std::string name() const;
+
+    /**
+     * \brief Retrieves this interface's friendly name.
+     *
+     * The name returned by this method can be more human-friendly than
+     * the one returned by NetworkInterface::name, depending on the platform
+     * in which it's used. 
+     *
+     * On GNU/Linux and OSX/FreeBSD, this returns the same string as 
+     * NetworkInterface::name.
+     *
+     * On Windows, this method returns a name such as 
+     * "Local Area Connection 1".
+     *
+     * Note thaat this returns a wstring rather than a string, to comply
+     * with Window's adapter's FriendlyName type.
+     *
+     * \return std::wstring containing this interface's name.
+     */
+    std::wstring friendly_name() const;
     
     /**
      * \brief Retrieve this interface's addresses.
@@ -152,7 +184,7 @@ public:
      * default constructor. 
      */
     operator bool() const {
-        return iface_id != 0;
+        return iface_id_ != 0;
     }
 
     /**
@@ -170,12 +202,37 @@ public:
     bool is_up() const;
 
     /**
+     * \brief Retrieves the hardware address for this interface.
+     */
+    address_type hw_address() const;
+
+    /**
+     * \brief Retrieves the IPv4 address for this interface.
+     */
+    IPv4Address ipv4_address() const;
+
+    /**
+     * \brief Retrieves the IPv4 netmask for this interface.
+     */
+    IPv4Address ipv4_mask() const;
+
+    /**
+     * \brief Retrieves the broadcast IPv4 address for this interface.
+     */
+    IPv4Address ipv4_broadcast() const;
+
+    /**
+     * \brief Retrieves the IPv6 addresses for this interface.
+     */
+    std::vector<IPv6Prefix> ipv6_addresses() const;
+
+    /**
      * \brief Compares this interface for equality.
      * 
      * \param rhs The interface being compared.
      */
-    bool operator==(const NetworkInterface &rhs) const {
-        return iface_id == rhs.iface_id;
+    bool operator==(const NetworkInterface& rhs) const {
+        return iface_id_ == rhs.iface_id_;
     }
     
     /**
@@ -183,13 +240,15 @@ public:
      * 
      * \param rhs The interface being compared.
      */
-    bool operator!=(const NetworkInterface &rhs) const {
+    bool operator!=(const NetworkInterface& rhs) const {
         return !(*this == rhs);
     }
 private:
-    id_type resolve_index(const char *name);
+    id_type resolve_index(const char* name);
 
-    id_type iface_id;
+    id_type iface_id_;
 };
-}
+
+} // Tins
+
 #endif // TINS_NETWORK_INTERFACE_H

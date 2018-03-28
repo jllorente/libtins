@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,16 +27,12 @@
  *
  */
 
-#include "radiotap.h"
+#include <tins/radiotap.h>
 
-#ifdef HAVE_DOT11
+#ifdef TINS_HAVE_DOT11
 
 #include <cstring>
-#ifdef TINS_DEBUG
-#include <cassert>
-#endif
-#include <stdexcept>
-#include "macros.h"
+#include <tins/macros.h>
 #ifndef _WIN32
     #if defined(BSD) || defined(__FreeBSD_kernel__)
         #include <net/if_dl.h>
@@ -46,136 +42,35 @@
     #endif
     #include <net/ethernet.h>
 #endif
-#include "dot11/dot11_base.h"
-#include "utils.h"
-#include "packet_sender.h"
-#include "exceptions.h"
+#include <tins/dot11/dot11_base.h>
+#include <tins/packet_sender.h>
+#include <tins/exceptions.h>
+#include <tins/memory_helpers.h>
+#include <tins/utils/checksum_utils.h>
+#include <tins/utils/frequency_utils.h>
+#include <tins/utils/radiotap_parser.h>
+#include <tins/utils/radiotap_writer.h>
+
+using std::memcpy;
+
+using Tins::Memory::InputMemoryStream;
+using Tins::Memory::OutputMemoryStream;
+
+using Tins::Utils::RadioTapParser;
+using Tins::Utils::RadioTapWriter;
 
 namespace Tins {
-void check_size(uint32_t total_sz, size_t field_size) {
-    if(total_sz < field_size)
-        throw malformed_packet();
-}
 
-template<typename T>
-void read_field(const uint8_t* &buffer, uint32_t &total_sz, T& field) {
-    check_size(total_sz, sizeof(field));
-    memcpy(&field, buffer, sizeof(field));
-    buffer += sizeof(field);
-    total_sz -= sizeof(field);
+template <typename T>
+void add_integral_option(RadioTap& radio, RadioTap::PresentFlags type, T value) {
+    uint8_t buffer[sizeof(value)];
+    value = Endian::host_to_le(value);
+    std::memcpy(buffer, &value, sizeof(value));
+    radio.add_option(RadioTap::option(type, sizeof(buffer), buffer));
 }
 
 RadioTap::RadioTap()
-{
-    std::memset(&_radio, 0, sizeof(_radio));
-    init();
-}
-
-RadioTap::RadioTap(const uint8_t *buffer, uint32_t total_sz)
-{
-    check_size(total_sz, sizeof(_radio));
-    const uint8_t *buffer_start = buffer;
-    std::memcpy(&_radio, buffer, sizeof(_radio));
-    uint32_t radiotap_hdr_size = length();
-    check_size(total_sz, radiotap_hdr_size);
-    // We start on the first flags field, skipping version, pad and length.
-    const flags_type* current_flags = (const flags_type*)(buffer + sizeof(uint32_t));
-    const uint32_t extra_flags_size = find_extra_flag_fields_size(
-        buffer + sizeof(uint32_t), total_sz);
-    // Find and skip the extra flag fields.
-    buffer += extra_flags_size;
-    radiotap_hdr_size -= extra_flags_size;
-    // Also skip the header
-    buffer += sizeof(_radio);
-    radiotap_hdr_size -= sizeof(_radio);
-
-    while(true) {
-        _radio.flags_32 |= *(const uint32_t*)current_flags;
-        if(current_flags->tsft) {
-            align_buffer<8>(buffer_start, buffer, radiotap_hdr_size);
-            read_field(buffer, radiotap_hdr_size, _tsft);
-        }
-
-        if(current_flags->flags)
-            read_field(buffer, radiotap_hdr_size, _flags);
-
-        if(current_flags->rate)
-            read_field(buffer, radiotap_hdr_size, _rate);
-
-        if(current_flags->channel) {
-            align_buffer<2>(buffer_start, buffer, radiotap_hdr_size);
-            read_field(buffer, radiotap_hdr_size, _channel_freq);
-            read_field(buffer, radiotap_hdr_size, _channel_type);
-        }
-
-        if(current_flags->dbm_signal)
-            read_field(buffer, radiotap_hdr_size, _dbm_signal);
-
-        if(current_flags->dbm_noise)
-            read_field(buffer, radiotap_hdr_size, _dbm_noise);
-
-        if(current_flags->lock_quality)
-            read_field(buffer, radiotap_hdr_size, _signal_quality);
-
-        if(current_flags->antenna)
-            read_field(buffer, radiotap_hdr_size, _antenna);
-
-        if(current_flags->db_signal)
-            read_field(buffer, radiotap_hdr_size, _db_signal);
-
-        if(current_flags->rx_flags) {
-            align_buffer<2>(buffer_start, buffer, radiotap_hdr_size);
-            read_field(buffer, radiotap_hdr_size, _rx_flags);
-        }
-
-        if(current_flags->tx_flags) {
-            align_buffer<2>(buffer_start, buffer, radiotap_hdr_size);
-            read_field(buffer, radiotap_hdr_size, _tx_flags);
-        }
-
-        if(current_flags->data_retries) {
-            read_field(buffer, radiotap_hdr_size, _data_retries);
-        }
-
-        if(current_flags->channel_plus) {
-            align_buffer<4>(buffer_start, buffer, radiotap_hdr_size);
-            uint32_t dummy;
-            read_field(buffer, radiotap_hdr_size, dummy);
-            // nasty Big Endian fix
-            _channel_type = Endian::le_to_host<uint16_t>(Endian::host_to_le<uint32_t>(dummy));
-            read_field(buffer, radiotap_hdr_size, _channel_freq);
-            read_field(buffer, radiotap_hdr_size, _channel);
-            read_field(buffer, radiotap_hdr_size, _max_power);
-        }
-        if(current_flags->mcs) {
-            read_field(buffer, radiotap_hdr_size, _mcs.known);
-            read_field(buffer, radiotap_hdr_size, _mcs.flags);
-            read_field(buffer, radiotap_hdr_size, _mcs.mcs);
-        } 
-        // We can do this safely because we checked the size on find_extra_flags...
-        if(current_flags->ext == 1) {
-            current_flags++;
-        }
-        else {
-            break;
-        }
-    }
-
-    total_sz -= length();
-    buffer += radiotap_hdr_size;
-
-    if(_radio.flags.flags && (flags() & FCS) != 0) {
-        check_size(total_sz, sizeof(uint32_t));
-        total_sz -= sizeof(uint32_t);
-        if((flags() & FAILED_FCS) !=0)
-            throw malformed_packet();
-    }
-
-    if(total_sz)
-        inner_pdu(Dot11::from_bytes(buffer, total_sz));
-}
-
-void RadioTap::init() {
+: header_(), options_payload_(4) {
     channel(Utils::channel_to_mhz(1), 0xa0);
     flags(FCS);
     tsft(0);
@@ -184,257 +79,248 @@ void RadioTap::init() {
     antenna(0);
 }
 
-// This method finds the extra flags field size, taking into account other
-// set of flags that may appear if the "ext" bit is on/.
-uint32_t RadioTap::find_extra_flag_fields_size(const uint8_t* buffer, uint32_t total_sz) {
-    const flags_type* ptr = (const flags_type*)buffer;
-    while (ptr->ext == 1) {
-        if (total_sz < sizeof(flags_type)) {
-            throw malformed_packet();
-        }
-        ++ptr;
+RadioTap::RadioTap(const uint8_t* buffer, uint32_t total_sz) {
+    InputMemoryStream input(buffer, total_sz);
+    input.read(header_);
+    uint32_t radiotap_size = length();
+    if (TINS_UNLIKELY(radiotap_size < sizeof(header_) + sizeof(uint32_t))) {
+        throw malformed_packet();
     }
 
-    return static_cast<uint32_t>((const uint8_t*)ptr - buffer);
+    radiotap_size -= sizeof(header_);
+    if (TINS_UNLIKELY(radiotap_size + sizeof(uint32_t) > input.size())) {
+        throw malformed_packet();
+    }
+
+    options_payload_.assign(input.pointer(), input.pointer() + radiotap_size);
+    input.skip(radiotap_size);
+
+    total_sz = input.size();
+    RadioTapParser parser(options_payload_);
+    if (parser.skip_to_field(FLAGS)) {
+        const uint8_t flags_value = *parser.current_option_ptr();
+        if ((flags_value & FCS) != 0) {
+            if (TINS_UNLIKELY(total_sz < sizeof(uint32_t))) {
+                throw malformed_packet();
+            }
+            total_sz -= sizeof(uint32_t);
+            if (TINS_UNLIKELY((flags_value & FAILED_FCS) != 0)) {
+                throw malformed_packet();
+            }
+        }
+    }
+
+    if (TINS_LIKELY(total_sz)) {
+        inner_pdu(Dot11::from_bytes(input.pointer(), total_sz));
+    }
 }
 
 // Setter for RadioTap fields
 void RadioTap::version(uint8_t new_version) {
-    _radio.it_version = new_version;
+    header_.it_version = new_version;
 }
 
 void RadioTap::padding(uint8_t new_padding) {
-    _radio.it_pad = new_padding;
+    header_.it_pad = new_padding;
 }
 
 void RadioTap::length(uint16_t new_length) {
-    _radio.it_len = Endian::host_to_le(new_length);
+    header_.it_len = Endian::host_to_le(new_length);
 }
 
 void RadioTap::tsft(uint64_t new_tsft) {
-    _tsft = Endian::host_to_le(new_tsft);
-    _radio.flags.tsft = 1;
+    add_integral_option(*this, TSFT, new_tsft);
 }
 
 void RadioTap::flags(FrameFlags new_flags) {
-    _flags = (uint8_t)new_flags;
-    _radio.flags.flags = 1;
+    add_integral_option(*this, FLAGS, (uint8_t)new_flags);
 }
 
 void RadioTap::rate(uint8_t new_rate) {
-    _rate = new_rate;
-    _radio.flags.rate = 1;
+    add_integral_option(*this, RATE, new_rate);
 }
 
 void RadioTap::channel(uint16_t new_freq, uint16_t new_type) {
-    _channel_freq = Endian::host_to_le(new_freq);
-    _channel_type = Endian::host_to_le(new_type);
-    _radio.flags.channel = 1;
+    uint8_t buffer[sizeof(uint16_t) * 2];
+    new_freq = Endian::host_to_le(new_freq);
+    new_type = Endian::host_to_le(new_type);
+    memcpy(buffer, &new_freq, sizeof(new_freq));
+    memcpy(buffer + sizeof(new_freq), &new_type, sizeof(new_type));
+    add_option(RadioTap::option(CHANNEL, sizeof(buffer), buffer));
 }
 void RadioTap::dbm_signal(int8_t new_dbm_signal) {
-    _dbm_signal = new_dbm_signal;
-    _radio.flags.dbm_signal = 1;
+    add_integral_option(*this, DBM_SIGNAL, new_dbm_signal);
 }
 
 void RadioTap::dbm_noise(int8_t new_dbm_noise) {
-    _dbm_noise = new_dbm_noise;
-    _radio.flags.dbm_noise = 1;
+    add_integral_option(*this, DBM_NOISE, new_dbm_noise);
 }
 
 void RadioTap::signal_quality(uint8_t new_signal_quality) {
-    _signal_quality = new_signal_quality;
-    _radio.flags.lock_quality = 1;
+    add_integral_option(*this, LOCK_QUALITY, new_signal_quality);
 }
 
 void RadioTap::data_retries(uint8_t new_data_retries) {
-    _data_retries = new_data_retries;
-    _radio.flags.data_retries = 1;
+    add_integral_option(*this, DATA_RETRIES, new_data_retries);
 }
 
 void RadioTap::antenna(uint8_t new_antenna) {
-    _antenna = new_antenna;
-    _radio.flags.antenna = 1;
+    add_integral_option(*this, ANTENNA, new_antenna);
 }
 
 void RadioTap::db_signal(uint8_t new_db_signal) {
-    _db_signal = new_db_signal;
-    _radio.flags.db_signal = 1;
+    add_integral_option(*this, DB_SIGNAL, new_db_signal);
 }
 
-void RadioTap::rx_flags(uint16_t new_rx_flag) {
-    _rx_flags = Endian::host_to_le(new_rx_flag);
-    _radio.flags.rx_flags = 1;
+void RadioTap::rx_flags(uint16_t new_rx_flags) {
+    add_integral_option(*this, RX_FLAGS, new_rx_flags);
 }
 
-void RadioTap::tx_flags(uint16_t new_tx_flag) {
-    _tx_flags = Endian::host_to_le(new_tx_flag);
-    _radio.flags.tx_flags = 1;
+void RadioTap::tx_flags(uint16_t new_tx_flags) {
+    add_integral_option(*this, TX_FLAGS, new_tx_flags);
+}
+
+void RadioTap::xchannel(xchannel_type new_xchannel) {
+    uint8_t buffer[sizeof(new_xchannel)];
+    new_xchannel.flags = Endian::host_to_le(new_xchannel.flags);
+    new_xchannel.frequency = Endian::host_to_le(new_xchannel.frequency);
+    memcpy(buffer, &new_xchannel, sizeof(new_xchannel));
+    add_option(RadioTap::option(XCHANNEL, sizeof(buffer), buffer));
 }
 
 void RadioTap::mcs(const mcs_type& new_mcs) {
-    _mcs = new_mcs;
-    _radio.flags.mcs = 1;   
+    uint8_t buffer[sizeof(new_mcs)];
+    memcpy(buffer, &new_mcs, sizeof(new_mcs));
+    add_option(RadioTap::option(MCS, sizeof(buffer), buffer));
+}
+
+RadioTap::PresentFlags RadioTap::present() const {
+    uint32_t output = 0;
+    RadioTapParser parser(options_payload_);
+    do {
+        output |= parser.namespace_flags();
+    }
+    while (parser.advance_namespace());
+    return static_cast<PresentFlags>(output);
 }
 
 uint32_t RadioTap::header_size() const {
-    uint32_t total_bytes = 0;
-    if(_radio.flags.tsft)
-        total_bytes += sizeof(_tsft);
-    if(_radio.flags.flags)
-        total_bytes += sizeof(_flags);
-    if(_radio.flags.rate)
-        total_bytes += sizeof(_rate);
-    if(_radio.flags.channel) {
-        total_bytes += (total_bytes & 1);
-        total_bytes += sizeof(uint16_t) * 2;
-    }
-    if(_radio.flags.dbm_signal)
-        total_bytes += sizeof(_dbm_signal);
-    if(_radio.flags.dbm_noise)
-        total_bytes += sizeof(_dbm_noise);
-    if(_radio.flags.lock_quality) {
-        total_bytes += (total_bytes & 1);
-        total_bytes += sizeof(_signal_quality);
-    }
-    if(_radio.flags.antenna)
-        total_bytes += sizeof(_antenna);
-    if(_radio.flags.db_signal)
-        total_bytes += sizeof(_db_signal);
-    if(_radio.flags.rx_flags) {
-        total_bytes += (total_bytes & 1);
-        total_bytes += sizeof(_rx_flags);
-    }
-    if(_radio.flags.tx_flags) {
-        total_bytes += (total_bytes & 1);
-        total_bytes += sizeof(_tx_flags);
-    }
-    if(_radio.flags.data_retries)
-        total_bytes += sizeof(_data_retries);
-    if(_radio.flags.channel_plus) {
-        uint32_t offset = total_bytes % 4;
-        if(offset)
-            total_bytes += 4 - offset;
-        total_bytes += 8;
-    }
-    if(_radio.flags.mcs) {
-        total_bytes += sizeof(_mcs);
-    }
-
-    return sizeof(_radio) + total_bytes;
+    return sizeof(header_) + options_payload_.size();
 }
 
 uint32_t RadioTap::trailer_size() const {
-    // will be sizeof(uint32_t) if the FCS-at-the-end bit is on.
-    return ((_flags & 0x10) != 0) ? sizeof(uint32_t) : 0;
+    RadioTapParser parser(options_payload_);
+    if (parser.skip_to_field(FLAGS)) {
+        const uint8_t flags_value = parser.current_option().to<uint8_t>();
+        // If there's FCS at the end, then return its size
+        if ((flags_value & FCS) != 0) {
+            return sizeof(uint32_t);
+        }
+    }
+    return 0;
+}
+
+void RadioTap::add_option(const option& opt) {
+    Utils::RadioTapWriter writer(options_payload_);
+    writer.write_option(opt);
+}
+
+const RadioTap::options_payload_type& RadioTap::options_payload() const {
+    return options_payload_;
 }
 
 // Getter for RadioTap fields
 uint8_t RadioTap::version() const {
-    return _radio.it_version;
+    return header_.it_version;
 }
 
 uint8_t RadioTap::padding() const {
-    return _radio.it_pad;
+    return header_.it_pad;
 }
 
 uint16_t RadioTap::length() const {
-    return Endian::le_to_host(_radio.it_len);
+    return Endian::le_to_host(header_.it_len);
 }
 
 uint64_t RadioTap::tsft() const {
-   if(!_radio.flags.tsft)
-        throw field_not_present();
-    return Endian::le_to_host(_tsft);
+    return do_find_option(TSFT).to<uint64_t>();
 }
 
 RadioTap::FrameFlags RadioTap::flags() const {
-    if(!_radio.flags.flags)
-        throw field_not_present();
-    return (FrameFlags)_flags;
+    return static_cast<FrameFlags>(do_find_option(FLAGS).to<uint8_t>());
 }
 
 uint8_t RadioTap::rate() const {
-    if(!_radio.flags.rate)
-        throw field_not_present();
-    return _rate;
+    return do_find_option(RATE).to<uint8_t>();
 }
 
 uint16_t RadioTap::channel_freq() const {
-    if(!_radio.flags.channel)
-         throw field_not_present();
-    return Endian::le_to_host(_channel_freq);
+    const option opt = do_find_option(CHANNEL);
+    uint16_t output;
+    memcpy(&output, opt.data_ptr(), sizeof(uint16_t));
+    return Endian::le_to_host(output);
 }
 
 uint16_t RadioTap::channel_type() const {
-    if(!_radio.flags.channel)
-        throw field_not_present();
-    return Endian::le_to_host(_channel_type);
+    const option opt = do_find_option(CHANNEL);
+    uint16_t output;
+    memcpy(&output, opt.data_ptr() + sizeof(uint16_t), sizeof(uint16_t));
+    return Endian::le_to_host(output);
 }
 
 int8_t RadioTap::dbm_signal() const {
-    if(!_radio.flags.dbm_signal)
-        throw field_not_present();
-    return _dbm_signal;
+    return do_find_option(DBM_SIGNAL).to<int8_t>();
 }
 
 int8_t RadioTap::dbm_noise() const {
-    if(!_radio.flags.dbm_noise)
-        throw field_not_present();
-    return _dbm_noise;
+    return do_find_option(DBM_NOISE).to<int8_t>();
 }
 
 uint16_t RadioTap::signal_quality() const {
-    if(!_radio.flags.lock_quality)
-         throw field_not_present();
-    return _signal_quality;
+    return do_find_option(DBM_SIGNAL).to<uint16_t>();
 }
 
 uint8_t RadioTap::antenna() const {
-    if(!_radio.flags.antenna)
-         throw field_not_present();
-    return _antenna;
+    return do_find_option(ANTENNA).to<uint8_t>();
 }
 
 RadioTap::mcs_type RadioTap::mcs() const {
-    if(!_radio.flags.mcs)
-         throw field_not_present();
-    return _mcs;
+    const option opt = do_find_option(MCS);
+    mcs_type output;
+    memcpy(&output, opt.data_ptr(), sizeof(output));
+    return output;
 }
 
 uint8_t RadioTap::db_signal() const {
-    if(!_radio.flags.db_signal)
-         throw field_not_present();
-    return _db_signal;
+    return do_find_option(DB_SIGNAL).to<uint8_t>();
 }
 
-uint32_t RadioTap::channel_plus() const {
-    if(!_radio.flags.channel_plus)
-        throw field_not_present();
-    return Endian::le_to_host<uint32_t>(_channel_type);
+RadioTap::xchannel_type RadioTap::xchannel() const {
+    const option opt = do_find_option(XCHANNEL);
+    xchannel_type output;
+    memcpy(&output, opt.data_ptr(), sizeof(output));
+    output.flags = Endian::le_to_host(output.flags);
+    output.frequency = Endian::le_to_host(output.frequency);
+    return output;
 }
 
 uint16_t RadioTap::rx_flags() const {
-    if(!_radio.flags.rx_flags)
-         throw field_not_present();
-    return Endian::le_to_host(_rx_flags);
+    return do_find_option(RX_FLAGS).to<uint16_t>();
 }
 
 uint16_t RadioTap::tx_flags() const {
-    if(!_radio.flags.tx_flags)
-         throw field_not_present();
-    return Endian::le_to_host(_tx_flags);
+    return do_find_option(TX_FLAGS).to<uint16_t>();
 }
 
 uint8_t RadioTap::data_retries() const {
-    if(!_radio.flags.data_retries)
-         throw field_not_present();
-    return _data_retries;
+    return do_find_option(DATA_RETRIES).to<uint8_t>();
 }
 
 #ifndef _WIN32
-void RadioTap::send(PacketSender &sender, const NetworkInterface &iface) {
-    if(!iface)
+void RadioTap::send(PacketSender& sender, const NetworkInterface& iface) {
+    if (!iface) {
         throw invalid_interface();
+    }
 
     #if !defined(BSD) && !defined(__FreeBSD_kernel__)
         struct sockaddr_ll addr;
@@ -446,24 +332,25 @@ void RadioTap::send(PacketSender &sender, const NetworkInterface &iface) {
         addr.sll_halen = 6;
         addr.sll_ifindex = iface.id();
 
-        const Tins::Dot11 *wlan = tins_cast<Tins::Dot11*>(inner_pdu());
-        if(wlan) {
+        const Tins::Dot11* wlan = tins_cast<Tins::Dot11*>(inner_pdu());
+        if (wlan) {
             Tins::Dot11::address_type dot11_addr(wlan->addr1());
             std::copy(dot11_addr.begin(), dot11_addr.end(), addr.sll_addr);
         }
 
-        sender.send_l2(*this, (struct sockaddr*)&addr, (uint32_t)sizeof(addr));
+        sender.send_l2(*this, (struct sockaddr*)&addr, (uint32_t)sizeof(addr), iface);
     #else
         sender.send_l2(*this, 0, 0, iface);
     #endif
 }
 #endif
 
-bool RadioTap::matches_response(const uint8_t *ptr, uint32_t total_sz) const {
-    if(sizeof(_radio) < total_sz)
+bool RadioTap::matches_response(const uint8_t* ptr, uint32_t total_sz) const {
+    if (sizeof(header_) < total_sz) {
         return false;
-    const radiotap_hdr *radio_ptr = (const radiotap_hdr*)ptr;
-    if(radio_ptr->it_len <= total_sz) {
+    }
+    const radiotap_header* radio_ptr = (const radiotap_header*)ptr;
+    if (radio_ptr->it_len <= total_sz) {
         ptr += radio_ptr->it_len;
         total_sz -= radio_ptr->it_len;
         return inner_pdu() ? inner_pdu()->matches_response(ptr, total_sz) : true;
@@ -471,90 +358,30 @@ bool RadioTap::matches_response(const uint8_t *ptr, uint32_t total_sz) const {
     return false;
 }
 
-void RadioTap::write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *parent) {
-    uint32_t sz = header_size();
-    uint8_t *buffer_start = buffer;
-    #ifdef TINS_DEBUG
-    assert(total_sz >= sz);
-    #endif
-    _radio.it_len = Endian::host_to_le<uint16_t>(sz);
-    memcpy(buffer, &_radio, sizeof(_radio));
-    buffer += sizeof(_radio);
-    if(_radio.flags.tsft) {
-        memcpy(buffer, &_tsft, sizeof(_tsft));
-        buffer += sizeof(_tsft);
-    }
-    if(_radio.flags.flags) {
-        memcpy(buffer, &_flags, sizeof(_flags));
-        buffer += sizeof(_flags);
-    }
-    if(_radio.flags.rate) {
-        memcpy(buffer, &_rate, sizeof(_rate));
-        buffer += sizeof(_rate);
-    }
-    if(_radio.flags.channel) {
-        if(((buffer - buffer_start) & 1) == 1)
-            *(buffer++) = 0;
-        memcpy(buffer, &_channel_freq, sizeof(_channel_freq));
-        buffer += sizeof(_channel_freq);
-        memcpy(buffer, &_channel_type, sizeof(_channel_type));
-        buffer += sizeof(_channel_type);
-    }
-    if(_radio.flags.dbm_signal) {
-        memcpy(buffer, &_dbm_signal, sizeof(_dbm_signal));
-        buffer += sizeof(_dbm_signal);
-    }
-    if(_radio.flags.dbm_noise) {
-        memcpy(buffer, &_dbm_noise, sizeof(_dbm_noise));
-        buffer += sizeof(_dbm_noise);
-    }
-    if(_radio.flags.lock_quality) {
-        if(((buffer - buffer_start) & 1) == 1)
-            *(buffer++) = 0;
-        memcpy(buffer, &_signal_quality, sizeof(_signal_quality));
-        buffer += sizeof(_signal_quality);
-    }
-    if(_radio.flags.antenna) {
-        memcpy(buffer, &_antenna, sizeof(_antenna));
-        buffer += sizeof(_antenna);
-    }
-    if(_radio.flags.db_signal) {
-        memcpy(buffer, &_db_signal, sizeof(_db_signal));
-        buffer += sizeof(_db_signal);
-    }
-    if(_radio.flags.rx_flags) {
-        if(((buffer - buffer_start) & 1) == 1)
-            *(buffer++) = 0;
-        memcpy(buffer, &_rx_flags, sizeof(_rx_flags));
-        buffer += sizeof(_rx_flags);
-    }
-    if(_radio.flags.channel_plus) {
-        uint32_t offset = ((buffer - buffer_start) % 4);
-        if(offset) {
-            offset = 4 - offset;
-            while(offset--) {
-                *buffer++ = 0;
-            }
-        }
-        uint32_t dummy = _channel_type;
-        // nasty Big Endian fix
-        dummy = Endian::le_to_host<uint32_t>(Endian::host_to_le<uint16_t>(dummy));
-        memcpy(buffer, &dummy, sizeof(dummy));
-        buffer += sizeof(dummy);
-        memcpy(buffer, &_channel_freq, sizeof(_channel_freq));
-        buffer += sizeof(_channel_freq);
-        memcpy(buffer, &_channel, sizeof(_channel));
-        buffer += sizeof(_channel);
-        memcpy(buffer, &_max_power, sizeof(_max_power));
-        buffer += sizeof(_max_power);
-    }
-    if((_flags & 0x10) != 0 && inner_pdu()) {
+void RadioTap::write_serialization(uint8_t* buffer, uint32_t total_sz) {
+    OutputMemoryStream stream(buffer, total_sz);
+    header_.it_len = Endian::host_to_le<uint16_t>(header_size());
+    stream.write(header_);
+    stream.write(options_payload_.begin(), options_payload_.end());
+
+    // If we have a trailer size, then we have the FCS flag on
+    if (trailer_size() > 0 && inner_pdu()) {
     	uint32_t crc32 = Endian::host_to_le(
-            Utils::crc32(buffer, inner_pdu()->size())
+            Utils::crc32(stream.pointer(), inner_pdu()->size())
         );
-        memcpy(buffer + inner_pdu()->size(), &crc32, sizeof(uint32_t));
+        stream.skip(inner_pdu()->size());
+        stream.write(crc32);
     }
-}
 }
 
-#endif // HAVE_DOT11
+RadioTap::option RadioTap::do_find_option(PresentFlags type) const {
+    RadioTapParser parser(options_payload_);
+    if (!parser.skip_to_field(type)) {
+        throw field_not_present();
+    }
+    return parser.current_option();
+}
+
+} // Tins
+
+#endif // TINS_HAVE_DOT11

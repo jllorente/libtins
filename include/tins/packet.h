@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,15 +30,15 @@
 #ifndef TINS_PACKET_H
 #define TINS_PACKET_H
 
-#include <algorithm>
-#include "cxxstd.h"
-#include "pdu.h"
-#include "timestamp.h"
+#include <tins/cxxstd.h>
+#include <tins/pdu.h>
+#include <tins/timestamp.h>
 
 /**
  * \namespace Tins
  */
 namespace Tins {
+
 template<typename WrappedType, typename TimestampType>
 class PacketWrapper;
 
@@ -101,20 +101,20 @@ public:
      * This is the timestamp in which the packet was taken out of the
      * network interface/pcap file.
      */
-    const Timestamp &timestamp() const {
+    const Timestamp& timestamp() const {
         return ts_;
     }
 private:
     friend class BaseSniffer;
     friend class SnifferIterator;
     
-    PacketWrapper(pdu_type pdu, const Timestamp &ts) 
+    PacketWrapper(pdu_type pdu, const Timestamp& ts) 
     : pdu_(pdu), ts_(ts) {}
     
     PacketWrapper(const PacketWrapper&);
     PacketWrapper& operator=(const PacketWrapper&);
     void* operator new (size_t size);
-    void operator delete (void *p);
+    void operator delete (void* p);
 
     pdu_type pdu_;
     timestamp_type ts_;
@@ -147,10 +147,18 @@ public:
     /**
      * \brief Constructs a Packet from a PDU* and a Timestamp.
      * 
-     * The PDU* is cloned using PDU::clone.
+     * The PDU is cloned using PDU::clone.
      */
-    Packet(const PDU *apdu, const Timestamp &tstamp) 
-    : pdu_(apdu->clone()), ts(tstamp) { }
+    Packet(const PDU* apdu, const Timestamp& tstamp) 
+    : pdu_(apdu->clone()), ts_(tstamp) { }
+
+    /**
+     * \brief Constructs a Packet from a PDU& and a Timestamp.
+     * 
+     * The PDU is cloned using PDU::clone.
+     */
+    Packet(const PDU& apdu, const Timestamp& tstamp) 
+    : pdu_(apdu.clone()), ts_(tstamp) { }
 
     /**
      * \brief Constructs a Packet from a PDU* and a Timestamp.
@@ -160,8 +168,8 @@ public:
      * will be done automatically by the Packet when it goes out
      * of scope.
      */
-    Packet(PDU *apdu, const Timestamp &tstamp, own_pdu) 
-    : pdu_(apdu), ts(tstamp) { }
+    Packet(PDU* apdu, const Timestamp& tstamp, own_pdu) 
+    : pdu_(apdu), ts_(tstamp) { }
     
     /**
      * \brief Constructs a Packet from a const PDU&.
@@ -171,8 +179,8 @@ public:
      * This calls PDU::clone on the PDU parameter.
      * 
      */
-    Packet(const PDU &rhs) 
-    : pdu_(rhs.clone()), ts(Timestamp::current_time()) { }
+    Packet(const PDU& rhs) 
+    : pdu_(rhs.clone()), ts_(Timestamp::current_time()) { }
     
     /**
      * \brief Constructs a Packet from a RefPacket.
@@ -180,21 +188,21 @@ public:
      * This calls PDU::clone on the RefPacket's PDU.
      * 
      */
-    Packet(const RefPacket &pck) 
-    : pdu_(pck.pdu().clone()), ts(pck.timestamp()) { }
+    Packet(const RefPacket& pck) 
+    : pdu_(pck.pdu().clone()), ts_(pck.timestamp()) { }
 
     /**
      * \brief Constructs a Packet from a PtrPacket object.
      */
-    Packet(const PtrPacket &pck)
-    : pdu_(pck.pdu()), ts(pck.timestamp()) { }
+    Packet(const PtrPacket& pck)
+    : pdu_(pck.pdu()), ts_(pck.timestamp()) { }
     
     /**
      * \brief Copy constructor.
      * 
      * This calls PDU::clone on the rhs's PDU* member.
      */
-    Packet(const Packet &rhs) : ts(rhs.timestamp()) {
+    Packet(const Packet& rhs) : ts_(rhs.timestamp()) {
         pdu_ = rhs.pdu() ? rhs.pdu()->clone() : 0;
     }
     
@@ -203,20 +211,20 @@ public:
      * 
      * This calls PDU::clone on the rhs's PDU* member.
      */
-    Packet& operator=(const Packet &rhs) {
-        if(this != &rhs) {
+    Packet& operator=(const Packet& rhs) {
+        if (this != &rhs) {
             delete pdu_;
-            ts = rhs.timestamp();
+            ts_ = rhs.timestamp();
             pdu_ = rhs.pdu() ? rhs.pdu()->clone() : 0;
         }
-        return *this;
+        return* this;
     }
     
     #if TINS_IS_CXX11
     /**
      * Move constructor.
      */
-    Packet(Packet &&rhs) TINS_NOEXCEPT : pdu_(rhs.pdu()), ts(rhs.timestamp()) {
+    Packet(Packet &&rhs) TINS_NOEXCEPT : pdu_(rhs.pdu()), ts_(rhs.timestamp()) {
         rhs.pdu_ = nullptr;
     }
     
@@ -224,11 +232,13 @@ public:
      * Move assignment operator.
      */
     Packet& operator=(Packet &&rhs) TINS_NOEXCEPT { 
-        if(this != &rhs) {
-            std::swap(pdu_, rhs.pdu_);
-            ts = rhs.timestamp();
+        if (this != &rhs) {
+            PDU* tmp = std::move(pdu_);
+            pdu_ = std::move(rhs.pdu_);
+            rhs.pdu_ = std::move(tmp);
+            ts_ = rhs.timestamp();
         }
-        return *this;
+        return* this;
     }
     #endif
     
@@ -244,8 +254,8 @@ public:
     /**
      * Returns this Packet's timestamp.
      */
-    const Timestamp &timestamp() const {
-        return ts;
+    const Timestamp& timestamp() const {
+        return ts_;
     }
     
     /**
@@ -253,7 +263,7 @@ public:
      * 
      * Caller <b>must not</b> delete the pointer. \sa Packet::release_pdu
      */
-    PDU *pdu() {
+    PDU* pdu() {
         return pdu_;
     }
     
@@ -262,7 +272,7 @@ public:
      * 
      * Caller <b>must not</b> delete the pointer. \sa Packet::release_pdu
      */
-    const PDU *pdu() const {
+    const PDU* pdu() const {
         return pdu_;
     }
     
@@ -275,8 +285,8 @@ public:
      * when Packet's destructor is called, the stored pointer will be 
      * deleted.
      */
-    PDU *release_pdu() {
-        PDU *some_pdu = pdu_;
+    PDU* release_pdu() {
+        PDU* some_pdu = pdu_;
         pdu_ = 0;
         return some_pdu;
     }
@@ -298,13 +308,13 @@ public:
      * 
      * \param rhs The PDU to be appended.
      */
-    Packet &operator/=(const PDU &rhs) {
+    Packet& operator/=(const PDU& rhs) {
         pdu_ /= rhs;
-        return *this;
+        return* this;
     }
 private:
-    PDU *pdu_;
-    Timestamp ts;
+    PDU* pdu_;
+    Timestamp ts_;
 };
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,76 +27,65 @@
  *
  */
 
-#include "dot11/dot11_probe.h"
+#include <tins/dot11/dot11_probe.h>
 
-#ifdef HAVE_DOT11
+#ifdef TINS_HAVE_DOT11
 
 #include <cstring>
-#include <cassert>
+#include <tins/memory_helpers.h>
+
+using Tins::Memory::InputMemoryStream;
+using Tins::Memory::OutputMemoryStream;
 
 namespace Tins {
-/* Probe Request */
 
-Dot11ProbeRequest::Dot11ProbeRequest(const address_type &dst_hw_addr, 
-  const address_type &src_hw_addr) 
-: Dot11ManagementFrame(dst_hw_addr, src_hw_addr) 
-{
-    this->subtype(Dot11::PROBE_REQ);
+// Probe Request
+
+Dot11ProbeRequest::Dot11ProbeRequest(const address_type& dst_hw_addr, 
+                                     const address_type& src_hw_addr) 
+: Dot11ManagementFrame(dst_hw_addr, src_hw_addr) {
+    subtype(Dot11::PROBE_REQ);
 }
 
-Dot11ProbeRequest::Dot11ProbeRequest(const uint8_t *buffer, uint32_t total_sz) 
-: Dot11ManagementFrame(buffer, total_sz) 
-{
-    uint32_t sz = management_frame_size();
-    buffer += sz;
-    total_sz -= sz;
-    parse_tagged_parameters(buffer, total_sz);
+Dot11ProbeRequest::Dot11ProbeRequest(const uint8_t* buffer, uint32_t total_sz) 
+: Dot11ManagementFrame(buffer, total_sz) {
+    InputMemoryStream stream(buffer, total_sz);
+    stream.skip(management_frame_size());
+    parse_tagged_parameters(stream);
 }
 
-/* Probe Response */
+// Probe Response
 
-Dot11ProbeResponse::Dot11ProbeResponse(const address_type &dst_hw_addr, 
-  const address_type &src_hw_addr) 
-: Dot11ManagementFrame(dst_hw_addr, src_hw_addr) 
-{
-    this->subtype(Dot11::PROBE_RESP);
-    memset(&_body, 0, sizeof(_body));
+Dot11ProbeResponse::Dot11ProbeResponse(const address_type& dst_hw_addr, 
+                                       const address_type& src_hw_addr) 
+: Dot11ManagementFrame(dst_hw_addr, src_hw_addr), body_() {
+    subtype(Dot11::PROBE_RESP);
 }
 
-Dot11ProbeResponse::Dot11ProbeResponse(const uint8_t *buffer, uint32_t total_sz) 
-: Dot11ManagementFrame(buffer, total_sz) 
-{
-    uint32_t sz = management_frame_size();
-    buffer += sz;
-    total_sz -= sz;
-    if(total_sz < sizeof(_body))
-        throw malformed_packet();
-    memcpy(&_body, buffer, sizeof(_body));
-    buffer += sizeof(_body);
-    total_sz -= sizeof(_body);
-    parse_tagged_parameters(buffer, total_sz);
+Dot11ProbeResponse::Dot11ProbeResponse(const uint8_t* buffer, uint32_t total_sz) 
+: Dot11ManagementFrame(buffer, total_sz) {
+    InputMemoryStream stream(buffer, total_sz);
+    stream.skip(management_frame_size());
+    stream.read(body_);
+    parse_tagged_parameters(stream);
 }
 
 void Dot11ProbeResponse::timestamp(uint64_t new_timestamp) {
-    this->_body.timestamp = Endian::host_to_le(new_timestamp);
+    body_.timestamp = Endian::host_to_le(new_timestamp);
 }
 
 void Dot11ProbeResponse::interval(uint16_t new_interval) {
-    this->_body.interval = Endian::host_to_le(new_interval);
+    body_.interval = Endian::host_to_le(new_interval);
 }
 
 uint32_t Dot11ProbeResponse::header_size() const {
-    return Dot11ManagementFrame::header_size() + sizeof(this->_body);
+    return Dot11ManagementFrame::header_size() + sizeof(body_);
 }
 
-uint32_t Dot11ProbeResponse::write_fixed_parameters(uint8_t *buffer, uint32_t total_sz) {
-    uint32_t sz = sizeof(this->_body);
-    #ifdef TINS_DEBUG
-    assert(sz <= total_sz);
-    #endif
-    memcpy(buffer, &this->_body, sz);
-    return sz;
+void Dot11ProbeResponse::write_fixed_parameters(OutputMemoryStream& stream) {
+    stream.write(body_);
 }
+
 } // namespace Tins
 
-#endif // HAVE_DOT11
+#endif // TINS_HAVE_DOT11

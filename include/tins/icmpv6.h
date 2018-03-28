@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,24 +30,31 @@
 #ifndef TINS_ICMPV6_H
 #define TINS_ICMPV6_H
 
-#include <list>
 #include <vector>
-#include "macros.h"
-#include "pdu.h"
-#include "ipv6_address.h"
-#include "pdu_option.h"
-#include "endianness.h"
-#include "small_uint.h"
-#include "hw_address.h"
-#include "small_uint.h"
-#include "cxxstd.h"
+#include <tins/macros.h>
+#include <tins/pdu.h>
+#include <tins/ipv6_address.h>
+#include <tins/pdu_option.h>
+#include <tins/endianness.h>
+#include <tins/small_uint.h>
+#include <tins/hw_address.h>
+#include <tins/small_uint.h>
+#include <tins/icmp_extension.h>
+#include <tins/cxxstd.h>
 
 namespace Tins {
+namespace Memory {
+
+class InputMemoryStream;
+class OutputMemoryStream;
+
+} // memory
+
 /**
  * \class ICMPv6
  * \brief Represents an ICMPv6 PDU.
  */
-class ICMPv6 : public PDU {
+class TINS_API ICMPv6 : public PDU {
 public:
     /**
      * \brief This PDU's flag.
@@ -72,14 +79,20 @@ public:
         NEIGHBOUR_SOLICIT = 135,
         NEIGHBOUR_ADVERT = 136,
         REDIRECT = 137,
-        ROUTER_RENUMBER = 137,
+        ROUTER_RENUMBER = 138,
         NI_QUERY = 139,
         NI_REPLY = 140,
         MLD2_REPORT = 143,
         DHAAD_REQUEST = 144,
         DHAAD_REPLY = 145,
-        MOBILE_PREFIX_SOL = 146,
-        MOBILE_PREFIX_ADV = 147
+        MOBILE_PREFIX_SOLICIT = 146,
+        MOBILE_PREFIX_ADVERT = 147,
+        CERT_PATH_SOLICIT = 148,
+        CERT_PATH_ADVERT = 149,
+        MULTICAST_ROUTER_ADVERT = 151,
+        MULTICAST_ROUTER_SOLICIT = 152,
+        MULTICAST_ROUTER_TERMINATE = 153,
+        RPL_CONTROL_MSG = 155
     };
     
     /**
@@ -141,7 +154,7 @@ public:
     /**
      * The type used to store options.
      */
-    typedef std::list<option> options_type;
+    typedef std::vector<option> options_type;
     
     /**
      * \brief The type used to store the new home agent information 
@@ -158,13 +171,12 @@ public:
         uint8_t reserved[6];
         addresses_type addresses;
         
-        addr_list_type(const addresses_type &addresses = addresses_type())
-        : addresses(addresses) 
-        {
+        addr_list_type(const addresses_type& addresses = addresses_type())
+        : addresses(addresses) {
             std::fill(reserved, reserved + sizeof(reserved), 0);
         }
         
-        static addr_list_type from_option(const option &opt);
+        static addr_list_type from_option(const option& opt);
     };
     
     /**
@@ -186,12 +198,11 @@ public:
         uint8_t reserved[4];
         
         naack_type(uint8_t code = 0, uint8_t status = 0)
-        : code(code), status(status)
-        {
+        : code(code), status(status) {
             std::fill(reserved, reserved + 4, 0);
         }
         
-        static naack_type from_option(const option &opt);
+        static naack_type from_option(const option& opt);
     };
     
     /**
@@ -210,9 +221,8 @@ public:
          * \param address The address to be stored.
          */
         lladdr_type(uint8_t option_code = 0, 
-          const address_type &address = address_type())
-        : option_code(option_code), address(address) 
-        {
+                    const address_type& address = address_type())
+        : option_code(option_code), address(address) {
             
         }
         
@@ -225,14 +235,12 @@ public:
          * \param option_code The option code.
          * \param address The address to be stored.
          */
-        lladdr_type(uint8_t option_code, 
-          const hwaddress_type &address)
-        : option_code(option_code), address(address.begin(), address.end()) 
-        {
+        lladdr_type(uint8_t option_code, const hwaddress_type& address)
+        : option_code(option_code), address(address.begin(), address.end()) {
             
         }
         
-        static lladdr_type from_option(const option &opt);
+        static lladdr_type from_option(const option& opt);
     };
     
     /**
@@ -242,18 +250,20 @@ public:
         uint8_t prefix_len;
         small_uint<1> A, L;
         uint32_t valid_lifetime,
-                preferred_lifetime,
-                reserved2;
+                 preferred_lifetime,
+                 reserved2;
         ipaddress_type prefix;
         
-        prefix_info_type(uint8_t prefix_len=0, small_uint<1> A=0, small_uint<1> L=0,
-          uint32_t valid_lifetime=0, uint32_t preferred_lifetime=0,
-          const ipaddress_type &prefix = ipaddress_type())
-        : prefix_len(prefix_len), A(A), L(L), 
-          valid_lifetime(valid_lifetime), preferred_lifetime(preferred_lifetime),
-          prefix(prefix) { }
+        prefix_info_type(uint8_t prefix_len = 0, 
+                         small_uint<1> A = 0,
+                         small_uint<1> L = 0,
+                         uint32_t valid_lifetime = 0, 
+                         uint32_t preferred_lifetime = 0,
+                         const ipaddress_type& prefix = ipaddress_type())
+        : prefix_len(prefix_len), A(A), L(L), valid_lifetime(valid_lifetime),
+          preferred_lifetime(preferred_lifetime), reserved2(0), prefix(prefix) { }
           
-        static prefix_info_type from_option(const option &opt);
+        static prefix_info_type from_option(const option& opt);
     };
     
     /**
@@ -283,10 +293,9 @@ public:
          * \param end A forward iterator pointing to the end of the 
          * sequence used to initialize signature.
          */
-        template<typename RAIterator, typename ForwardIterator>
+        template <typename RAIterator, typename ForwardIterator>
         rsa_sign_type(RAIterator hash, ForwardIterator start, ForwardIterator end)
-        : signature(start, end)
-        {
+        : signature(start, end) {
             std::copy(hash, hash + sizeof(key_hash), key_hash);
         }
         
@@ -302,10 +311,9 @@ public:
          * key_hash member.
          * \param sign The signature to be set.
          */
-        template<typename RAIterator>
-        rsa_sign_type(RAIterator hash, const signature_type &sign)
-        : signature(sign)
-        {
+        template <typename RAIterator>
+        rsa_sign_type(RAIterator hash, const signature_type& sign)
+        : signature(sign) {
             std::copy(hash, hash + sizeof(key_hash), key_hash);
         }
         
@@ -314,12 +322,11 @@ public:
          * 
          * The key_hash member will be 0-initialized.
          */
-        rsa_sign_type()
-        {
+        rsa_sign_type() {
             std::fill(key_hash, key_hash + sizeof(key_hash), 0);
         }
 
-        static rsa_sign_type from_option(const option &opt);
+        static rsa_sign_type from_option(const option& opt);
     };
     
     /**
@@ -329,12 +336,13 @@ public:
         uint8_t option_code, prefix_len;
         ipaddress_type address;
         
-        ip_prefix_type(uint8_t option_code = 0, uint8_t prefix_len = 0,
-          const ipaddress_type &address = ipaddress_type())
+        ip_prefix_type(uint8_t option_code = 0,
+                       uint8_t prefix_len = 0,
+                       const ipaddress_type& address = ipaddress_type())
         : option_code(option_code), prefix_len(prefix_len), address(address)
         {}
 
-        static ip_prefix_type from_option(const option &opt);
+        static ip_prefix_type from_option(const option& opt);
     };
     
     /**
@@ -346,13 +354,15 @@ public:
         uint32_t valid_lifetime;
         ipaddress_type address;
         
-        map_type(small_uint<4> dist = 0, small_uint<4> pref = 0, 
-          small_uint<1> r = 0, uint32_t valid_lifetime = 0, 
-          const ipaddress_type &address = ipaddress_type())
+        map_type(small_uint<4> dist = 0,
+                 small_uint<4> pref = 0, 
+                 small_uint<1> r = 0, 
+                 uint32_t valid_lifetime = 0, 
+                 const ipaddress_type& address = ipaddress_type())
         : dist(dist), pref(pref), r(r), valid_lifetime(valid_lifetime),
           address(address) { }
 
-        static map_type from_option(const option &opt);
+        static map_type from_option(const option& opt);
     };
     
     /**
@@ -366,12 +376,14 @@ public:
         uint32_t route_lifetime;
         prefix_type prefix;
         
-        route_info_type(uint8_t prefix_len = 0, small_uint<2> pref = 0, 
-          uint32_t route_lifetime = 0, const prefix_type &prefix = prefix_type())
+        route_info_type(uint8_t prefix_len = 0, 
+                        small_uint<2> pref = 0, 
+                        uint32_t route_lifetime = 0,
+                        const prefix_type& prefix = prefix_type())
         : prefix_len(prefix_len), pref(pref), route_lifetime(route_lifetime),
           prefix(prefix) { }
 
-        static route_info_type from_option(const option &opt);
+        static route_info_type from_option(const option& opt);
     };
     
     /**
@@ -384,10 +396,10 @@ public:
         servers_type servers;
         
         recursive_dns_type(uint32_t lifetime = 0, 
-          const servers_type &servers = servers_type())
+                           const servers_type& servers = servers_type())
         : lifetime(lifetime), servers(servers) {}
 
-        static recursive_dns_type from_option(const option &opt);
+        static recursive_dns_type from_option(const option& opt);
     };
     
     /**
@@ -400,10 +412,10 @@ public:
         key_type key;
         
         handover_key_req_type(small_uint<4> AT = 0,
-          const key_type &key = key_type())
+                              const key_type& key = key_type())
         : AT(AT), key(key) { }
 
-        static handover_key_req_type from_option(const option &opt);
+        static handover_key_req_type from_option(const option& opt);
     };
     
     /**
@@ -412,11 +424,12 @@ public:
     struct handover_key_reply_type : handover_key_req_type {
         uint16_t lifetime;
         
-        handover_key_reply_type(uint16_t lifetime = 0, small_uint<4> AT = 0,
-          const key_type &key = key_type())
+        handover_key_reply_type(uint16_t lifetime = 0, 
+                                small_uint<4> AT = 0,
+                                const key_type& key = key_type())
         : handover_key_req_type(AT, key), lifetime(lifetime) { }
 
-        static handover_key_reply_type from_option(const option &opt);
+        static handover_key_reply_type from_option(const option& opt);
     };
     
     /**
@@ -429,10 +442,10 @@ public:
         hai_type hai;
         
         handover_assist_info_type(uint8_t option_code=0, 
-          const hai_type &hai = hai_type())
+                                  const hai_type& hai = hai_type())
         : option_code(option_code), hai(hai) { }
 
-        static handover_assist_info_type from_option(const option &opt);
+        static handover_assist_info_type from_option(const option& opt);
     };
     
     /**
@@ -445,10 +458,10 @@ public:
         mn_type mn;
         
         mobile_node_id_type(uint8_t option_code=0, 
-          const mn_type &mn = mn_type())
+                            const mn_type& mn = mn_type())
         : option_code(option_code), mn(mn) { }
 
-        static mobile_node_id_type from_option(const option &opt);
+        static mobile_node_id_type from_option(const option& opt);
     };
     
     /**
@@ -461,10 +474,10 @@ public:
         domains_type domains;
         
         dns_search_list_type(uint32_t lifetime = 0,
-          const domains_type &domains = domains_type())
+                             const domains_type& domains = domains_type())
         : lifetime(lifetime), domains(domains) { }
 
-        static dns_search_list_type from_option(const option &opt);
+        static dns_search_list_type from_option(const option& opt);
     };
 
     /**
@@ -475,12 +488,11 @@ public:
         uint64_t timestamp;
 
         timestamp_type(uint64_t timestamp = 0)
-        : timestamp(timestamp)
-        {
+        : timestamp(timestamp) {
             std::fill(reserved, reserved + sizeof(reserved), 0);
         }
 
-        static timestamp_type from_option(const option &opt);
+        static timestamp_type from_option(const option& opt);
     };
 
     /**
@@ -491,12 +503,11 @@ public:
         uint32_t reserved2;
 
         shortcut_limit_type(uint8_t limit = 0)
-        : limit(limit), reserved1(), reserved2()
-        {
+        : limit(limit), reserved1(), reserved2() {
 
         }
 
-        static shortcut_limit_type from_option(const option &opt);
+        static shortcut_limit_type from_option(const option& opt);
     };
 
     /**
@@ -507,13 +518,42 @@ public:
         uint32_t interval;
 
         new_advert_interval_type(uint32_t interval = 0)
-        : reserved(), interval(interval)
-        {
+        : reserved(), interval(interval) {
 
         }
 
-        static new_advert_interval_type from_option(const option &opt);
+        static new_advert_interval_type from_option(const option& opt);
     };
+
+    /**
+     * The type used to represent a multicast address record
+     */
+    struct multicast_address_record {
+        typedef std::vector<ipaddress_type> sources_type;
+        typedef std::vector<uint8_t> aux_data_type;
+
+        multicast_address_record(uint8_t type = 0) : type(type) { }
+
+        multicast_address_record(const uint8_t* buffer, uint32_t total_sz);
+        void serialize(uint8_t* buffer, uint32_t total_sz) const;
+        uint32_t size() const;
+
+        uint8_t type;
+        ipaddress_type multicast_address;
+        sources_type sources;
+        aux_data_type aux_data;
+    };
+
+    /*
+     * The type used to store all multicast address records in a packet
+     */
+    typedef std::vector<multicast_address_record> multicast_address_records_list;
+
+    /*
+     * The type used to store all source address (from Multicast 
+     * Listener Query messages) in a packet 
+     */
+    typedef std::vector<ipaddress_type> sources_list;
 
     /**
      * \brief Constructs an ICMPv6 object.
@@ -536,7 +576,7 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    ICMPv6(const uint8_t *buffer, uint32_t total_sz);
+    ICMPv6(const uint8_t* buffer, uint32_t total_sz);
     
     // Getters
 
@@ -545,7 +585,7 @@ public:
      *  \return The stored type field value.
      */
     Types type() const {
-        return static_cast<Types>(_header.type);
+        return static_cast<Types>(header_.type);
     }
 
     /**
@@ -553,7 +593,7 @@ public:
      *  \return The stored code field value.
      */
     uint8_t code() const {
-        return _header.code;
+        return header_.code;
     }
 
     /**
@@ -561,7 +601,7 @@ public:
      *  \return The stored cksum field value.
      */
     uint16_t checksum() const {
-        return Endian::be_to_host(_header.cksum);
+        return Endian::be_to_host(header_.cksum);
     }
 
     /**
@@ -569,7 +609,7 @@ public:
      *  \return The stored identifier field value.
      */
     uint16_t identifier() const {
-        return Endian::be_to_host(_header.u_echo.identifier);
+        return Endian::be_to_host(header_.u_echo.identifier);
     }
 
     /**
@@ -577,7 +617,7 @@ public:
      *  \return The stored sequence field value.
      */
     uint16_t sequence() const {
-        return Endian::be_to_host(_header.u_echo.sequence);
+        return Endian::be_to_host(header_.u_echo.sequence);
     }
 
     /**
@@ -585,7 +625,7 @@ public:
      *  \return The stored override field value.
      */
     small_uint<1> override() const {
-        return _header.u_nd_advt.override;
+        return header_.u_nd_advt.override;
     }
 
     /**
@@ -593,7 +633,7 @@ public:
      *  \return The stored solicited field value.
      */
     small_uint<1> solicited() const {
-        return _header.u_nd_advt.solicited;
+        return header_.u_nd_advt.solicited;
     }
 
     /**
@@ -601,15 +641,23 @@ public:
      *  \return The stored router field value.
      */
     small_uint<1> router() const {
-        return _header.u_nd_advt.router;
+        return header_.u_nd_advt.router;
     }
 
     /**
-     *  \brief Getter for the hop_limit field.
-     *  \return The stored hop_limit field value.
+     *  \brief Getter for the hop limit field.
+     *  \return The stored hop limit field value.
      */
     uint8_t hop_limit() const {
-        return _header.u_nd_ra.hop_limit;
+        return header_.u_nd_ra.hop_limit;
+    }
+
+    /**
+     * \brief Getter for the maximum response code field.
+     * \return The stored maximum response code field value.
+     */
+    uint16_t maximum_response_code() const {
+        return Endian::be_to_host(header_.u_echo.identifier);
     }
 
     /**
@@ -617,7 +665,7 @@ public:
      *  \return The stored router_pref field value.
      */
     small_uint<2> router_pref() const {
-        return _header.u_nd_ra.router_pref;
+        return header_.u_nd_ra.router_pref;
     }
 
     /**
@@ -625,7 +673,7 @@ public:
      *  \return The stored home_agent field value.
      */
     small_uint<1> home_agent() const {
-        return _header.u_nd_ra.home_agent;
+        return header_.u_nd_ra.home_agent;
     }
 
     /**
@@ -633,7 +681,7 @@ public:
      *  \return The stored other field value.
      */
     small_uint<1> other() const {
-        return _header.u_nd_ra.other;
+        return header_.u_nd_ra.other;
     }
 
     /**
@@ -641,7 +689,7 @@ public:
      *  \return The stored managed field value.
      */
     small_uint<1> managed() const {
-        return _header.u_nd_ra.managed;
+        return header_.u_nd_ra.managed;
     }
 
     /**
@@ -649,7 +697,7 @@ public:
      *  \return The stored router_lifetime field value.
      */
     uint16_t router_lifetime() const {
-        return Endian::be_to_host(_header.u_nd_ra.router_lifetime);
+        return Endian::be_to_host(header_.u_nd_ra.router_lifetime);
     }
     
     /**
@@ -657,7 +705,7 @@ public:
      *  \return The stored reachable_time field value.
      */
     uint32_t reachable_time() const {
-        return Endian::be_to_host(reach_time);
+        return Endian::be_to_host(reach_time_);
     }
     
     /**
@@ -665,31 +713,98 @@ public:
      *  \return The stored retransmit_timer field value.
      */
     uint32_t retransmit_timer() const {
-        return Endian::be_to_host(retrans_timer);
+        return Endian::be_to_host(retrans_timer_);
     }
     
     /**
      *  \brief Getter for the target address field.
      *  \return The stored target address field value.
      */
-    const ipaddress_type &target_addr() const {
-        return _target_address;
+    const ipaddress_type& target_addr() const {
+        return target_address_;
     }
     
     /**
      *  \brief Getter for the destination address field.
      *  \return The stored destination address field value.
      */
-    const ipaddress_type &dest_addr() const {
-        return _dest_address;
+    const ipaddress_type& dest_addr() const {
+        return dest_address_;
+    }
+
+    /**
+     * \brief Getter for the multicast address field.
+     *
+     * Note that this field is only valid for Multicast Listener Query
+     * Message packets
+     * \return The stored multicast address field value.
+     */
+    const ipaddress_type& multicast_addr() const {
+        return multicast_address_;
     }
 
     /**
      *  \brief Getter for the ICMPv6 options.
      *  \return The stored options.
      */
-    const options_type &options() const {
-        return _options;
+    const options_type& options() const {
+        return options_;
+    }
+
+    /**
+     * \brief Getter for the length field.
+     *
+     * \return Returns the length field value.
+     */
+    uint8_t length() const { 
+        return header_.rfc4884.length;
+    }
+
+    /**
+     * \brief Getter for the multicast address records field
+     */
+    const multicast_address_records_list& multicast_address_records() const {
+        return multicast_records_;
+    }
+
+    /**
+     * \brief Getter for the multicast address records field.
+     *
+     * Note that this field is only valid for Multicast Listener Query Message
+     * packets
+     */
+    const sources_list& sources() const {
+        return sources_;
+    }
+
+    /**
+     * \brief Getter for the Suppress Router-Side Processing field.
+     *
+     * Note that this field is only valid for Multicast Listener Query Message
+     * packets
+     */
+    small_uint<1> supress() const {
+        return mlqm_.supress;
+    }
+
+    /**
+     * \brief Getter for the Querier's Robustnes Variable field.
+     *
+     * Note that this field is only valid for Multicast Listener Query Message
+     * packets
+     */
+    small_uint<3> qrv() const {
+        return mlqm_.qrv;
+    }
+
+    /**
+     * \brief Getter for the Querier's Query Interval Code field.
+     *
+     * Note that this field is only valid for Multicast Listener Query Message
+     * packets
+     */
+    uint8_t qqic() const {
+        return mlqm_.qqic;
     }
 
     // Setters
@@ -749,6 +864,12 @@ public:
     void hop_limit(uint8_t new_hop_limit);
 
     /**
+     *  \brief Setter for the maximum response code field.
+     *  \param new_hop_limit The new maximum response code field value.
+     */
+    void maximum_response_code(uint16_t maximum_response_code);
+
+    /**
      *  \brief Setter for the router_pref field.
      *  \param new_router_pref The new router_pref field value.
      */
@@ -782,13 +903,22 @@ public:
      *  \brief Setter for the target address field.
      *  \param new_target_addr The new target address field value.
      */
-    void target_addr(const ipaddress_type &new_target_addr);
+    void target_addr(const ipaddress_type& new_target_addr);
     
     /**
      *  \brief Setter for the destination address field.
      *  \param new_dest_addr The new destination address field value.
      */
-    void dest_addr(const ipaddress_type &new_dest_addr);
+    void dest_addr(const ipaddress_type& new_dest_addr);
+
+    /**
+     * \brief Setter for the multicast address field.
+     *
+     * Note that this field is only valid if the type is MGM_QUERY
+     *
+     * \param new_multicast_addr The new multicast address field value.
+     */
+    void multicast_addr(const ipaddress_type& new_multicast_addr);
 
     /**
      *  \brief Setter for the reachable_time field.
@@ -801,6 +931,41 @@ public:
      *  \param new_retrans_timer The new retrans_timer field value.
      */
     void retransmit_timer(uint32_t new_retrans_timer);
+
+    /**
+     *  \brief Setter for the multicast address records field.
+     *
+     * This field is only valid if the type of this PDU is MLD2_REPORT
+     */
+    void multicast_address_records(const multicast_address_records_list& records);
+
+    /**
+     * \brief Setter for the sources field.
+     *
+     * This field is only valid if the type of this PDU is MGM_QUERY
+     */
+    void sources(const sources_list& new_sources);
+
+    /**
+     * \brief Setter for the supress field.
+     *
+     * This field is only valid if the type of this PDU is MGM_QUERY
+     */
+    void supress(small_uint<1> value);
+
+    /**
+     * \brief Setter for the Querier's Robustness Variable field.
+     *
+     * This field is only valid if the type of this PDU is MGM_QUERY
+     */
+    void qrv(small_uint<3> value);
+
+    /**
+     * \brief Setter for the Querier's Query Interval Code field.
+     *
+     * This field is only valid if the type of this PDU is MGM_QUERY
+     */
+    void qqic(uint8_t value);
 
     /**
      * \brief Getter for the PDU's type.
@@ -816,8 +981,8 @@ public:
      */
     bool has_target_addr() const {
         return type() == NEIGHBOUR_SOLICIT || 
-                type() == NEIGHBOUR_ADVERT || 
-                type() == REDIRECT;
+               type() == NEIGHBOUR_ADVERT || 
+               type() == REDIRECT;
     }
     
     /**
@@ -837,7 +1002,7 @@ public:
      * 
      * \param option The option to be added
      */
-    void add_option(const option &option);
+    void add_option(const option& option);
     
     #if TINS_IS_CXX11
         /**
@@ -849,7 +1014,7 @@ public:
          */
         void add_option(option &&option) {
             internal_add_option(option);
-            _options.push_back(std::move(option));
+            options_.push_back(std::move(option));
         }
     #endif
 
@@ -867,19 +1032,70 @@ public:
     /**
      * \brief Returns the header size.
      *
-     * This metod overrides PDU::header_size. This size includes the
+     * This method overrides PDU::header_size. This size includes the
      * payload and options size. \sa PDU::header_size
      */
     uint32_t header_size() const;
+
+    /**
+     * \brief Returns the trailer size.
+     *
+     * This method overrides PDU::trailer_size. This size will hold the extensions size
+     *
+     * \sa PDU::header_size
+     */
+    uint32_t trailer_size() const;
     
     /** 
-     * \brief Check wether ptr points to a valid response for this PDU.
+     * \brief Getter for the extensions field.
+     *
+     * \return The extensions field
+     */
+    const ICMPExtensionsStructure& extensions() const {
+        return extensions_;
+    }
+
+    /** 
+     * \brief Getter for the extensions field.
+     *
+     * \return The extensions field
+     */
+    ICMPExtensionsStructure& extensions() {
+        return extensions_;
+    }
+
+    /**
+     * \brief Indicates whether this object contains ICMP extensions
+     */
+    bool has_extensions() const {
+        return !extensions_.extensions().empty();
+    }
+
+    /**
+     * \brief Sets whether the length field will be set for packets that use it
+     *
+     * As defined in RFC 4884, some ICMP packet types can have a length field. This
+     * method controlers whether the length field is set or not.
+     *
+     * Note that this only indicates that the packet should use this field. The 
+     * actual value will be set during the packet's serialization.
+     *
+     * Note that, in order to br RFC compliant, if the size of the encapsulated
+     * PDU is greater than 128, the length field will always be set, regardless
+     * of whether this method was called or not.
+     *
+     * /param value true iff the length field should be set appropriately
+     */
+    void use_length_field(bool value);
+
+    /** 
+     * \brief Check whether ptr points to a valid response for this PDU.
      *
      * \sa PDU::matches_response
      * \param ptr The pointer to the buffer.
      * \param total_sz The size of the buffer.
      */
-    bool matches_response(const uint8_t *ptr, uint32_t total_sz) const;
+    bool matches_response(const uint8_t* ptr, uint32_t total_sz) const;
 
     /**
      * \brief Searchs for an option that matchs the given flag.
@@ -890,14 +1106,25 @@ public:
      * 
      * \param type The option identifier to be searched.
      */
-    const option *search_option(OptionTypes type) const;
+    const option* search_option(OptionTypes type) const;
 
     /**
      * \sa PDU::clone
      */
-    ICMPv6 *clone() const {
+    ICMPv6* clone() const {
         return new ICMPv6(*this);
     }
+
+    /** 
+     * \brief Indicates whether to use MLDv2
+     *
+     * If this is set to true, then MLDv2 will be used rather than MLDv1 when
+     * serializing Multicast Listener Discovery messages. By default,
+     * MLDv2 will be used.
+     *
+     * \param value The value to set
+     */
+    void use_mldv2(bool value);
     
     // ****************************************************************
     //                          Option setters
@@ -908,14 +1135,14 @@ public:
      * 
      * \param addr The source link layer address.
      */
-    void source_link_layer_addr(const hwaddress_type &addr);
+    void source_link_layer_addr(const hwaddress_type& addr);
     
     /**
      * \brief Setter for the target link layer address option.
      * 
      * \param addr The target link layer address.
      */
-    void target_link_layer_addr(const hwaddress_type &addr);
+    void target_link_layer_addr(const hwaddress_type& addr);
     
     /**
      * \brief Setter for the prefix information option.
@@ -929,7 +1156,7 @@ public:
      * 
      * \param data The redirect header option data.
      */
-    void redirect_header(const byte_array &data);
+    void redirect_header(const byte_array& data);
     
     /**
      * \brief Setter for the MTU option.
@@ -950,56 +1177,56 @@ public:
      * 
      * \param value The new advertisement interval option data.
      */
-    void new_advert_interval(const new_advert_interval_type &value);
+    void new_advert_interval(const new_advert_interval_type& value);
     
     /**
      * \brief Setter for the new home agent information option.
      * 
      * \param value The new home agent information option data.
      */
-    void new_home_agent_info(const new_ha_info_type &value);
+    void new_home_agent_info(const new_ha_info_type& value);
     
     /**
      * \brief Setter for the new source address list option.
      * 
      * \param value The new source address list option data.
      */
-    void source_addr_list(const addr_list_type &value);
+    void source_addr_list(const addr_list_type& value);
     
     /**
      * \brief Setter for the new target address list option.
      * 
      * \param value The new target address list option data.
      */
-    void target_addr_list(const addr_list_type &value);
+    void target_addr_list(const addr_list_type& value);
     
     /**
      * \brief Setter for the new RSA signature option.
      * 
      * \param value The new RSA signature option data.
      */
-    void rsa_signature(const rsa_sign_type &value);
+    void rsa_signature(const rsa_sign_type& value);
     
     /**
      * \brief Setter for the new timestamp option.
      * 
      * \param value The new timestamp option data.
      */
-    void timestamp(const timestamp_type &value);
+    void timestamp(const timestamp_type& value);
     
     /**
      * \brief Setter for the new nonce option.
      * 
      * \param value The new nonce option data.
      */
-    void nonce(const nonce_type &value);
+    void nonce(const nonce_type& value);
     
     /**
      * \brief Setter for the new IP address/prefix option.
      * 
      * \param value The new IP address/prefix option data.
      */
-    void ip_prefix(const ip_prefix_type &value);
+    void ip_prefix(const ip_prefix_type& value);
 
     /**
      * \brief Setter for the new link layer address option.
@@ -1013,63 +1240,63 @@ public:
      * 
      * \param value The new naack option data.
      */
-    void naack(const naack_type &value);
+    void naack(const naack_type& value);
     
     /**
      * \brief Setter for the map option.
      * 
      * \param value The new map option data.
      */
-    void map(const map_type &value);
+    void map(const map_type& value);
     
     /**
      * \brief Setter for the route information option.
      * 
      * \param value The new route information option data.
      */
-    void route_info(const route_info_type &value);
+    void route_info(const route_info_type& value);
     
     /**
      * \brief Setter for the recursive DNS servers option.
      * 
      * \param value The new recursive DNS servers option data.
      */
-    void recursive_dns_servers(const recursive_dns_type &value);
+    void recursive_dns_servers(const recursive_dns_type& value);
     
     /**
      * \brief Setter for the handover key request option.
      * 
      * \param value The new handover key request option data.
      */
-    void handover_key_request(const handover_key_req_type &value);
+    void handover_key_request(const handover_key_req_type& value);
     
     /**
      * \brief Setter for the handover key reply option.
      * 
      * \param value The new handover key reply option data.
      */
-    void handover_key_reply(const handover_key_reply_type &value);
+    void handover_key_reply(const handover_key_reply_type& value);
     
     /**
      * \brief Setter for the handover assist info option.
      * 
      * \param value The new handover assist info option data.
      */
-    void handover_assist_info(const handover_assist_info_type &value);
+    void handover_assist_info(const handover_assist_info_type& value);
     
     /**
      * \brief Setter for the mobile node identifier option.
      * 
      * \param value The new mobile node identifier option data.
      */
-    void mobile_node_identifier(const mobile_node_id_type &value);
+    void mobile_node_identifier(const mobile_node_id_type& value);
     
     /**
      * \brief Setter for the DNS search list option.
      * 
      * \param value The new DNS search list option data.
      */
-    void dns_search_list(const dns_search_list_type &value);
+    void dns_search_list(const dns_search_list_type& value);
     
     // ****************************************************************
     //                          Option getters
@@ -1269,7 +1496,7 @@ public:
     dns_search_list_type dns_search_list() const;
 private:
     TINS_BEGIN_PACK
-    struct icmp6hdr {
+    struct icmp6_header {
         uint8_t	type;
         uint8_t code;
         uint16_t cksum;
@@ -1282,15 +1509,15 @@ private:
             struct {
         #if TINS_IS_LITTLE_ENDIAN
             uint32_t reserved:5,
-                        override:1,
-                        solicited:1,
-                        router:1,
-                        reserved2:24;
+                     override:1,
+                     solicited:1,
+                     router:1,
+                     reserved2:24;
         #else
             uint32_t router:1,
-                        solicited:1,
-                        override:1,
-                        reserved:29;
+                     solicited:1,
+                     override:1,
+                     reserved:29;
         #endif						
             } u_nd_advt;
             struct {
@@ -1310,42 +1537,72 @@ private:
         #endif
                 uint16_t router_lifetime;
             } u_nd_ra;
+            struct {
+                uint8_t length;
+                uint8_t unused[3];
+            } rfc4884;
+            // Multicast Listener Report Message (mld2)
+            struct {
+                uint16_t reserved;
+                uint16_t record_count;
+            } mlrm2;
         };
     } TINS_END_PACK;
+
+    TINS_BEGIN_PACK
+    struct multicast_listener_query_message_fields {
+        uint8_t reserved:4,
+                supress:1,
+                qrv:3;
+        uint8_t qqic;
+    } TINS_END_PACK;
     
-    void internal_add_option(const option &option);
-    void write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *parent);
+    void internal_add_option(const option& option);
+    void write_serialization(uint8_t* buffer, uint32_t total_sz);
     bool has_options() const;
-    uint8_t *write_option(const option &opt, uint8_t *buffer);
-    void parse_options(const uint8_t *&buffer, uint32_t &total_sz);
-    void add_addr_list(uint8_t type, const addr_list_type &value);
+    void write_option(const option& opt, Memory::OutputMemoryStream& stream);
+    void parse_options(Memory::InputMemoryStream& stream);
+    void add_addr_list(uint8_t type, const addr_list_type& value);
     addr_list_type search_addr_list(OptionTypes type) const;
     options_type::const_iterator search_option_iterator(OptionTypes type) const;
     options_type::iterator search_option_iterator(OptionTypes type);
-    
-    template<template <typename> class Functor>
-    const option *safe_search_option(OptionTypes opt, uint32_t size) const {
-        const option *option = search_option(opt);
-        if(!option || Functor<uint32_t>()(option->data_size(), size))
+    void try_parse_extensions(Memory::InputMemoryStream& stream);
+    bool are_extensions_allowed() const;
+    uint32_t get_adjusted_inner_pdu_size() const;
+    uint8_t get_option_padding(uint32_t data_size);
+
+    template <template <typename> class Functor>
+    const option* safe_search_option(OptionTypes opt, uint32_t size) const {
+        const option* option = search_option(opt);
+        if (!option || Functor<uint32_t>()(option->data_size(), size)) {
             throw option_not_found();
+        }
         return option;
     }
 
-    template<typename T>
+    template <typename T>
     T search_and_convert(OptionTypes type) const {
-        const option *opt = search_option(type);
-        if(!opt)
+        const option* opt = search_option(type);
+        if (!opt) {
             throw option_not_found();
+        }
         return opt->to<T>();
     }
 
-    icmp6hdr _header;
-    ipaddress_type _target_address, _dest_address;
-    options_type _options;
-    uint32_t _options_size;
-    uint32_t reach_time, retrans_timer;
+    icmp6_header header_;
+    ipaddress_type target_address_;
+    ipaddress_type dest_address_;
+    ipaddress_type multicast_address_;
+    options_type options_;
+    uint32_t options_size_;
+    uint32_t reach_time_, retrans_timer_;
+    multicast_address_records_list multicast_records_;
+    multicast_listener_query_message_fields mlqm_;
+    sources_list sources_;
+    ICMPExtensionsStructure extensions_;
+    bool use_mldv2_;
 };
-}
 
+} // Tins
 
 #endif // TINS_ICMPV6_H

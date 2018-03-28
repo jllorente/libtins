@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,17 +27,13 @@
  *
  */
 
-#include "dot11/dot11_base.h"
+#include <tins/dot11/dot11_base.h>
 
-#ifdef HAVE_DOT11
+#ifdef TINS_HAVE_DOT11
 
-#include <cassert>
 #include <cstring>
-#include <stdexcept>
-#include <algorithm>
-#include <utility>
-#include "macros.h"
-#include "exceptions.h"
+#include <tins/macros.h>
+#include <tins/exceptions.h>
 
 #ifndef _WIN32
     #if defined(__FreeBSD_kernel__) || defined(BSD) || defined(__APPLE__)
@@ -49,151 +45,154 @@
     #include <net/ethernet.h>
     #include <netinet/in.h>
 #endif
-#include "dot11.h"
-#include "rawpdu.h"
-#include "rsn_information.h"
-#include "packet_sender.h"
-#include "snap.h"
+#include <tins/dot11.h>
+#include <tins/packet_sender.h>
+#include <tins/memory_helpers.h>
+
+using std::vector;
+
+using Tins::Memory::InputMemoryStream;
+using Tins::Memory::OutputMemoryStream;
 
 namespace Tins {
+
 const Dot11::address_type Dot11::BROADCAST = "ff:ff:ff:ff:ff:ff";
 
-Dot11::Dot11(const address_type &dst_hw_addr) 
-: _options_size(0)
-{
-    memset(&_header, 0, sizeof(ieee80211_header));
+Dot11::Dot11(const address_type& dst_hw_addr) 
+: header_(), options_size_(0) {
     addr1(dst_hw_addr);
 }
 
-Dot11::Dot11(const ieee80211_header *header_ptr) 
-{
-
+Dot11::Dot11(const dot11_header* /*header_ptr*/)
+: header_(), options_size_(0) {
 }
 
-Dot11::Dot11(const uint8_t *buffer, uint32_t total_sz) 
-: _options_size(0) 
-{
-    if(total_sz < sizeof(_header))
-        throw malformed_packet();
-    std::memcpy(&_header, buffer, sizeof(_header));
+Dot11::Dot11(const uint8_t* buffer, uint32_t total_sz) 
+: options_size_(0) {
+    InputMemoryStream stream(buffer, total_sz);
+    stream.read(header_);
 }
 
-void Dot11::parse_tagged_parameters(const uint8_t *buffer, uint32_t total_sz) {
-    if(total_sz > 0) {
-        uint8_t opcode, length;
-        while(total_sz >= 2) {
-            opcode = buffer[0];
-            length = buffer[1];
-            buffer += 2;
-            total_sz -= 2;
-            if(length > total_sz) {
+void Dot11::write_ext_header(Memory::OutputMemoryStream& /*stream*/) {
+}
+
+void Dot11::write_fixed_parameters(Memory::OutputMemoryStream& /*stream*/) {
+}
+
+void Dot11::parse_tagged_parameters(InputMemoryStream& stream) {
+    if (stream) {
+        while (stream.size() >= 2) {
+            OptionTypes opcode = static_cast<OptionTypes>(stream.read<uint8_t>());
+            uint8_t length = stream.read<uint8_t>();
+            if (!stream.can_read(length)) {
                 throw malformed_packet();
             }
-            add_tagged_option((OptionTypes)opcode, length, buffer);
-            buffer += length;
-            total_sz -= length;
+            add_tagged_option(opcode, length, stream.pointer());
+            stream.skip(length);
         }
     }
 }
 
-void Dot11::add_tagged_option(OptionTypes opt, uint8_t len, const uint8_t *val) {
+void Dot11::add_tagged_option(OptionTypes opt, uint8_t len, const uint8_t* val) {
     uint32_t opt_size = len + sizeof(uint8_t) * 2;
-    _options.push_back(option((uint8_t)opt, val, val + len));
-    _options_size += opt_size;
+    options_.push_back(option((uint8_t)opt, val, val + len));
+    options_size_ += opt_size;
 }
 
-void Dot11::internal_add_option(const option &opt) {
-    _options_size += static_cast<uint32_t>(opt.data_size() + sizeof(uint8_t) * 2);
+void Dot11::internal_add_option(const option& opt) {
+    options_size_ += static_cast<uint32_t>(opt.data_size() + sizeof(uint8_t) * 2);
 }
 
 bool Dot11::remove_option(OptionTypes type) {
     options_type::iterator iter = search_option_iterator(type);
-    if (iter == _options.end()) {
+    if (iter == options_.end()) {
         return false;
     }
-    _options_size -= static_cast<uint32_t>(iter->data_size() + sizeof(uint8_t) * 2);
-    _options.erase(iter);
+    options_size_ -= static_cast<uint32_t>(iter->data_size() + sizeof(uint8_t) * 2);
+    options_.erase(iter);
     return true;
 }
 
-void Dot11::add_option(const option &opt) {
+void Dot11::add_option(const option& opt) {
     internal_add_option(opt);
-    _options.push_back(opt);
+    options_.push_back(opt);
 }
 
-const Dot11::option *Dot11::search_option(OptionTypes type) const {
+const Dot11::option* Dot11::search_option(OptionTypes type) const {
     // Search for the iterator. If we found something, return it, otherwise return nullptr.
     options_type::const_iterator iter = search_option_iterator(type);
-    return (iter != _options.end()) ? &*iter : 0;
+    return (iter != options_.end()) ? &*iter : 0;
 }
 
 Dot11::options_type::const_iterator Dot11::search_option_iterator(OptionTypes type) const {
-    Internals::option_type_equality_comparator<option> comparator(static_cast<uint8_t>(type));
-    return find_if(_options.begin(), _options.end(), comparator);
+    return Internals::find_option_const<option>(options_, type);
 }
 
 Dot11::options_type::iterator Dot11::search_option_iterator(OptionTypes type) {
-    Internals::option_type_equality_comparator<option> comparator(static_cast<uint8_t>(type));
-    return find_if(_options.begin(), _options.end(), comparator);
+    return Internals::find_option<option>(options_, type);
 }
 
 void Dot11::protocol(small_uint<2> new_proto) {
-    this->_header.control.protocol = new_proto;
+    header_.control.protocol = new_proto;
 }
 
 void Dot11::type(small_uint<2> new_type) {
-    this->_header.control.type = new_type;
+    header_.control.type = new_type;
 }
 
 void Dot11::subtype(small_uint<4> new_subtype) {
-    this->_header.control.subtype = new_subtype;
+    header_.control.subtype = new_subtype;
 }
 
 void Dot11::to_ds(small_uint<1> new_value) {
-    this->_header.control.to_ds = (new_value)? 1 : 0;
+    header_.control.to_ds = (new_value)? 1 : 0;
 }
 
 void Dot11::from_ds(small_uint<1> new_value) {
-    this->_header.control.from_ds = (new_value)? 1 : 0;
+    header_.control.from_ds = (new_value)? 1 : 0;
 }
 
 void Dot11::more_frag(small_uint<1> new_value) {
-    this->_header.control.more_frag = (new_value)? 1 : 0;
+    header_.control.more_frag = (new_value)? 1 : 0;
 }
 
 void Dot11::retry(small_uint<1> new_value) {
-    this->_header.control.retry = (new_value)? 1 : 0;
+    header_.control.retry = (new_value)? 1 : 0;
 }
 
 void Dot11::power_mgmt(small_uint<1> new_value) {
-    this->_header.control.power_mgmt = (new_value)? 1 : 0;
+    header_.control.power_mgmt = (new_value)? 1 : 0;
+}
+
+void Dot11::more_data(small_uint<1> new_value) {
+    header_.control.more_data = (new_value)? 1 : 0;
 }
 
 void Dot11::wep(small_uint<1> new_value) {
-    this->_header.control.wep = (new_value)? 1 : 0;
+    header_.control.wep = (new_value)? 1 : 0;
 }
 
 void Dot11::order(small_uint<1> new_value) {
-    this->_header.control.order = (new_value)? 1 : 0;
+    header_.control.order = (new_value)? 1 : 0;
 }
 
 void Dot11::duration_id(uint16_t new_duration_id) {
-    this->_header.duration_id = Endian::host_to_le(new_duration_id);
+    header_.duration_id = Endian::host_to_le(new_duration_id);
 }
 
-void Dot11::addr1(const address_type &new_addr1) {
-    std::copy(new_addr1.begin(), new_addr1.end(), _header.addr1);
+void Dot11::addr1(const address_type& new_addr1) {
+    new_addr1.copy(header_.addr1);
 }
 
 uint32_t Dot11::header_size() const {
-    uint32_t sz = sizeof(ieee80211_header) + _options_size;
-    return sz;
+    return sizeof(header_) + options_size_;
 }
 
 #ifndef _WIN32
-void Dot11::send(PacketSender &sender, const NetworkInterface &iface) {
-    if(!iface)
+void Dot11::send(PacketSender& sender, const NetworkInterface& iface) {
+    if (!iface) {
         throw invalid_interface();
+    }
     
     #if !defined(BSD) && !defined(__FreeBSD_kernel__)
         sockaddr_ll addr;
@@ -204,95 +203,92 @@ void Dot11::send(PacketSender &sender, const NetworkInterface &iface) {
         addr.sll_protocol = Endian::host_to_be<uint16_t>(ETH_P_ALL);
         addr.sll_halen = 6;
         addr.sll_ifindex = iface.id();
-        memcpy(&(addr.sll_addr), _header.addr1, 6);
-        sender.send_l2(*this, (struct sockaddr*)&addr, (uint32_t)sizeof(addr));
+        memcpy(&(addr.sll_addr), header_.addr1, 6);
+        sender.send_l2(*this, (struct sockaddr*)&addr, (uint32_t)sizeof(addr), iface);
     #else
         sender.send_l2(*this, 0, 0, iface);
     #endif
 }
 #endif // _WIN32
 
-void Dot11::write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *parent) {
-    #ifdef TINS_DEBUG
-    assert(total_sz >= header_size());
-    #endif
-    memcpy(buffer, &_header, sizeof(_header));
-    buffer += sizeof(_header);
-    total_sz -= sizeof(_header);
-
-    uint32_t written = write_ext_header(buffer, total_sz);
-    buffer += written;
-    total_sz -= written;
-
-    uint32_t child_len = write_fixed_parameters(buffer, total_sz - _options_size);
-    buffer += child_len;
-    #ifdef TINS_DEBUG
-    assert(total_sz >= child_len + _options_size);
-    #endif
-    for(std::list<option>::const_iterator it = _options.begin(); it != _options.end(); ++it) {
-        *(buffer++) = it->option();
-        *(buffer++) = static_cast<uint8_t>(it->length_field());
-        std::copy(it->data_ptr(), it->data_ptr() + it->data_size(), buffer);
-        buffer += it->data_size();
+void Dot11::write_serialization(uint8_t* buffer, uint32_t total_sz) {
+    OutputMemoryStream stream(buffer, total_sz);
+    stream.write(header_);
+    write_ext_header(stream);
+    write_fixed_parameters(stream);
+    for (vector<option>::const_iterator it = options_.begin(); it != options_.end(); ++it) {
+        stream.write<uint8_t>(it->option());
+        stream.write<uint8_t>(it->length_field());
+        stream.write(it->data_ptr(), it->data_size());
     }
 }
 
-Dot11 *Dot11::from_bytes(const uint8_t *buffer, uint32_t total_sz) {
+Dot11* Dot11::from_bytes(const uint8_t* buffer, uint32_t total_sz) {
     // We only need the control field, the length of the PDU will depend on the flags set.
     
-    // This should be sizeof(ieee80211_header::control), but gcc 4.2 complains
-    if(total_sz < 2)
+    // This should be sizeof(dot11_header::control), but gcc 4.2 complains
+    if (total_sz < 2) {
         throw malformed_packet();
-    const ieee80211_header *hdr = (const ieee80211_header*)buffer;
-    Dot11 *ret = 0;
-    if(hdr->control.type == MANAGEMENT) {
-        if(hdr->control.subtype == BEACON)
-            ret = new Dot11Beacon(buffer, total_sz);
-        else if(hdr->control.subtype == DISASSOC)
-            ret = new Dot11Disassoc(buffer, total_sz);
-        else if(hdr->control.subtype == ASSOC_REQ)
-            ret = new Dot11AssocRequest(buffer, total_sz);
-        else if(hdr->control.subtype == ASSOC_RESP)
-            ret = new Dot11AssocResponse(buffer, total_sz);
-        else if(hdr->control.subtype == REASSOC_REQ)
-            ret = new Dot11ReAssocRequest(buffer, total_sz);
-        else if(hdr->control.subtype == REASSOC_RESP)
-            ret = new Dot11ReAssocResponse(buffer, total_sz); 
-        else if(hdr->control.subtype == AUTH)
-            ret = new Dot11Authentication(buffer, total_sz); 
-        else if(hdr->control.subtype == DEAUTH)
-            ret = new Dot11Deauthentication(buffer, total_sz); 
-        else if(hdr->control.subtype == PROBE_REQ)
-            ret = new Dot11ProbeRequest(buffer, total_sz); 
-        else if(hdr->control.subtype == PROBE_RESP)
-            ret = new Dot11ProbeResponse(buffer, total_sz); 
     }
-    else if(hdr->control.type == DATA){
-        if(hdr->control.subtype <= 4)
-            ret = new Dot11Data(buffer, total_sz);
-        else
-            ret = new Dot11QoSData(buffer, total_sz);
+    const dot11_header* hdr = (const dot11_header*)buffer;
+    if (hdr->control.type == MANAGEMENT) {
+        switch (hdr->control.subtype) {
+            case BEACON:
+                return new Dot11Beacon(buffer, total_sz);
+            case DISASSOC:
+                return new Dot11Disassoc(buffer, total_sz);
+            case ASSOC_REQ:
+                return new Dot11AssocRequest(buffer, total_sz);
+            case ASSOC_RESP:
+                return new Dot11AssocResponse(buffer, total_sz);
+            case REASSOC_REQ:
+                return new Dot11ReAssocRequest(buffer, total_sz);
+            case REASSOC_RESP:
+                return new Dot11ReAssocResponse(buffer, total_sz); 
+            case AUTH:
+                return new Dot11Authentication(buffer, total_sz); 
+            case DEAUTH:
+                return new Dot11Deauthentication(buffer, total_sz); 
+            case PROBE_REQ:
+                return new Dot11ProbeRequest(buffer, total_sz); 
+            case PROBE_RESP:
+                return new Dot11ProbeResponse(buffer, total_sz); 
+            default: 
+                break;
+        };
     }
-    else if(hdr->control.type == CONTROL){
-        if(hdr->control.subtype == ACK)
-            ret = new Dot11Ack(buffer, total_sz);
-        else if(hdr->control.subtype == CF_END)
-            ret = new Dot11CFEnd(buffer, total_sz);
-        else if(hdr->control.subtype == CF_END_ACK)
-            ret = new Dot11EndCFAck(buffer, total_sz);
-        else if(hdr->control.subtype == PS)
-            ret = new Dot11PSPoll(buffer, total_sz);
-        else if(hdr->control.subtype == RTS)
-            ret = new Dot11RTS(buffer, total_sz);
-        else if(hdr->control.subtype == BLOCK_ACK)
-            ret = new Dot11BlockAck(buffer, total_sz);
-        else if(hdr->control.subtype == BLOCK_ACK_REQ)
-            ret = new Dot11BlockAckRequest(buffer, total_sz);
+    else if (hdr->control.type == DATA) {
+        if (hdr->control.subtype <= 4) {
+            return new Dot11Data(buffer, total_sz);
+        }
+        else {
+            return new Dot11QoSData(buffer, total_sz);
+        }
     }
-    if(ret == 0)
-        ret = new Dot11(buffer, total_sz);
-    return ret;
+    else if (hdr->control.type == CONTROL) {
+        switch (hdr->control.subtype) {
+            case ACK:
+                return new Dot11Ack(buffer, total_sz);
+            case CF_END:
+                return new Dot11CFEnd(buffer, total_sz);
+            case CF_END_ACK:
+                return new Dot11EndCFAck(buffer, total_sz);
+            case PS:
+                return new Dot11PSPoll(buffer, total_sz);
+            case RTS:
+                return new Dot11RTS(buffer, total_sz);
+            case BLOCK_ACK:
+                return new Dot11BlockAck(buffer, total_sz);
+            case BLOCK_ACK_REQ:
+                return new Dot11BlockAckRequest(buffer, total_sz);
+            default:
+                break;
+        };
+    }
+    // Fallback to just building a dot11
+    return new Dot11(buffer, total_sz);
 }
-} // namespace Tins
 
-#endif // HAVE_DOT11
+} // Tins
+
+#endif // TINS_HAVE_DOT11

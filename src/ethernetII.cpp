@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,13 +27,8 @@
  *
  */
 
-#ifdef TINS_DEBUG
-#include <cassert>
-#endif
 #include <cstring>
-#include <stdexcept>
-#include <algorithm>
-#include "macros.h"
+#include <tins/macros.h>
 #ifndef _WIN32
     #if defined(BSD) || defined(__FreeBSD_kernel__)
         #include <net/if_dl.h>
@@ -43,84 +38,89 @@
     #include <netinet/in.h>
     #include <net/ethernet.h>
 #endif
-#include "config.h"
-#include "ethernetII.h"
-#include "packet_sender.h"
-#include "rawpdu.h"
-#include "ip.h"
-#include "ipv6.h"
-#include "arp.h"
-#include "constants.h"
-#include "internals.h"
-#include "exceptions.h"
+#include <tins/ethernetII.h>
+#include <tins/config.h>
+#include <tins/packet_sender.h>
+#include <tins/pppoe.h>
+#include <tins/constants.h>
+#include <tins/exceptions.h>
+#include <tins/memory_helpers.h>
+#include <tins/detail/pdu_helpers.h>
+
+using Tins::Memory::InputMemoryStream;
+using Tins::Memory::OutputMemoryStream;
 
 namespace Tins {
+
 const EthernetII::address_type EthernetII::BROADCAST("ff:ff:ff:ff:ff:ff");
 
-EthernetII::EthernetII(const address_type &dst_hw_addr, 
-const address_type &src_hw_addr) 
-{
-    memset(&_eth, 0, sizeof(ethhdr));
-    dst_addr(dst_hw_addr);
-    src_addr(src_hw_addr);
-    _eth.payload_type = 0;
-
+PDU::metadata EthernetII::extract_metadata(const uint8_t *buffer, uint32_t total_sz) {
+    if (TINS_UNLIKELY(total_sz < sizeof(ethernet_header))) {
+        throw malformed_packet();
+    }
+    const ethernet_header* header = (const ethernet_header*)buffer;
+    PDUType next_type = Internals::ether_type_to_pdu_flag(
+        static_cast<Constants::Ethernet::e>(Endian::be_to_host(header->payload_type)));
+    return metadata(sizeof(ethernet_header), pdu_flag, next_type); 
 }
 
-EthernetII::EthernetII(const uint8_t *buffer, uint32_t total_sz) 
-{
-    if(total_sz < sizeof(ethhdr))
-        throw malformed_packet();
-    memcpy(&_eth, buffer, sizeof(ethhdr));
-    buffer += sizeof(ethhdr);
-    total_sz -= sizeof(ethhdr);
-    if(total_sz) {
+EthernetII::EthernetII(const address_type& dst_hw_addr, 
+                       const address_type& src_hw_addr) 
+: header_() {
+    dst_addr(dst_hw_addr);
+    src_addr(src_hw_addr);
+}
+
+EthernetII::EthernetII(const uint8_t* buffer, uint32_t total_sz) {
+    InputMemoryStream stream(buffer, total_sz);
+    stream.read(header_);
+    // If there's any size left
+    if (stream) {
         inner_pdu(
             Internals::pdu_from_flag(
                 (Constants::Ethernet::e)payload_type(), 
-                buffer, 
-                total_sz
+                stream.pointer(), 
+                stream.size()
             )
         );
     }
-
 }
 
-void EthernetII::dst_addr(const address_type &new_dst_addr) {
-    new_dst_addr.copy(_eth.dst_mac);
+void EthernetII::dst_addr(const address_type& new_dst_addr) {
+    new_dst_addr.copy(header_.dst_mac);
 }
 
-void EthernetII::src_addr(const address_type &new_src_addr) {
-    new_src_addr.copy(_eth.src_mac);
+void EthernetII::src_addr(const address_type& new_src_addr) {
+    new_src_addr.copy(header_.src_mac);
 }
 
 void EthernetII::payload_type(uint16_t new_payload_type) {
-    this->_eth.payload_type = Endian::host_to_be(new_payload_type);
+    header_.payload_type = Endian::host_to_be(new_payload_type);
 }
 
 uint32_t EthernetII::header_size() const {
-
-    return sizeof(ethhdr);
+    return sizeof(header_);
 }
 
 uint32_t EthernetII::trailer_size() const {
-    int32_t padding = 60 - sizeof(ethhdr); // EthernetII min size is 60, padding is sometimes needed
+    int32_t padding = 60 - sizeof(header_); // EthernetII min size is 60, padding is sometimes needed
     if (inner_pdu()) {
         padding -= inner_pdu()->size();
-        padding = std::max(0, padding);
+        padding = padding > 0 ? padding : 0;
     }
     return padding;
 }
 
-void EthernetII::send(PacketSender &sender, const NetworkInterface &iface) {
-    if(!iface)
+void EthernetII::send(PacketSender& sender, const NetworkInterface& iface) {
+    if (!iface) {
         throw invalid_interface();
-    #if defined(HAVE_PACKET_SENDER_PCAP_SENDPACKET) || defined(BSD) || defined(__FreeBSD_kernel__)
+    }
+    #if defined(TINS_HAVE_PACKET_SENDER_PCAP_SENDPACKET) || defined(BSD) || defined(__FreeBSD_kernel__)
         // Sending using pcap_sendpacket/BSD bpf packet mode is the same here
         sender.send_l2(*this, 0, 0, iface);
     #elif defined(_WIN32)
         // On Windows we can only send l2 PDUs using pcap_sendpacket
-        throw std::runtime_error("LIBTINS_USE_PCAP_SENDPACKET is not enabled");
+        throw feature_disabled();
     #else
         // Default GNU/Linux behaviour
         struct sockaddr_ll addr;
@@ -131,51 +131,62 @@ void EthernetII::send(PacketSender &sender, const NetworkInterface &iface) {
         addr.sll_protocol = Endian::host_to_be<uint16_t>(ETH_P_ALL);
         addr.sll_halen = address_type::address_size;
         addr.sll_ifindex = iface.id();
-        memcpy(&(addr.sll_addr), _eth.dst_mac, address_type::address_size);
+        memcpy(&(addr.sll_addr), header_.dst_mac, address_type::address_size);
 
-        sender.send_l2(*this, (struct sockaddr*)&addr, (uint32_t)sizeof(addr));
+        sender.send_l2(*this, (struct sockaddr*)&addr, (uint32_t)sizeof(addr), iface);
     #endif
 }
 
-bool EthernetII::matches_response(const uint8_t *ptr, uint32_t total_sz) const {
-    if(total_sz < sizeof(ethhdr))
+bool EthernetII::matches_response(const uint8_t* ptr, uint32_t total_sz) const {
+    if (total_sz < sizeof(header_)) {
         return false;
-    const size_t addr_sz = address_type::address_size;
-    const ethhdr *eth_ptr = (const ethhdr*)ptr;
-    if(std::equal(_eth.src_mac, _eth.src_mac + addr_sz, eth_ptr->dst_mac)) {
-        if(std::equal(_eth.src_mac, _eth.src_mac + addr_sz, eth_ptr->dst_mac) || !dst_addr().is_unicast())
-        {
-            return (inner_pdu()) ? inner_pdu()->matches_response(ptr + sizeof(_eth), total_sz - sizeof(_eth)) : true;
+    }
+    const ethernet_header* eth_ptr = (const ethernet_header*)ptr;
+    if (address_type(header_.src_mac) == address_type(eth_ptr->dst_mac)) {
+        if (address_type(header_.src_mac) == address_type(eth_ptr->dst_mac) || 
+           !dst_addr().is_unicast()) {
+            return inner_pdu() ? 
+                   inner_pdu()->matches_response(ptr + sizeof(header_), total_sz - sizeof(header_)) : 
+                   true;
         }
     }
     return false;
 }
 
-void EthernetII::write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *parent) {
-    #ifdef TINS_DEBUG
-    assert(total_sz >= header_size() + trailer_size());
-    #endif
-
-    /* Inner type defaults to IP */
+void EthernetII::write_serialization(uint8_t* buffer, uint32_t total_sz) {
+    OutputMemoryStream stream(buffer, total_sz);
     if (inner_pdu()) {
-        Constants::Ethernet::e flag = Internals::pdu_flag_to_ether_type(
-            inner_pdu()->pdu_type()
-        );
-        payload_type(static_cast<uint16_t>(flag));
+        Constants::Ethernet::e flag;
+        const PDUType type = inner_pdu()->pdu_type();
+        // Dirty trick to successfully tag PPPoE session/discovery packets
+        if (type == PDU::PPPOE) {
+            const PPPoE* pppoe = static_cast<const PPPoE*>(inner_pdu());
+            flag = (pppoe->code() == 0) ? Constants::Ethernet::PPPOES 
+                                        : Constants::Ethernet::PPPOED;
+        }
+        else {
+            flag = Internals::pdu_flag_to_ether_type(type);
+        }
+        if (flag != Constants::Ethernet::UNKNOWN) {
+            payload_type(static_cast<uint16_t>(flag));
+        }
     }
-    memcpy(buffer, &_eth, sizeof(ethhdr));
-    uint32_t trailer = trailer_size();
+    else {
+        payload_type(Constants::Ethernet::UNKNOWN);
+    }
+    stream.write(header_);
+    const uint32_t trailer = trailer_size();
     if (trailer) {
-        uint32_t trailer_offset = header_size();
-        if (inner_pdu())
-            trailer_offset += inner_pdu()->size();
-        memset(buffer + trailer_offset, 0, trailer);
+        if (inner_pdu()) {
+            stream.skip(inner_pdu()->size());
+        }
+        stream.fill(trailer, 0);
     }
 
 }
 
 #ifndef _WIN32
-PDU *EthernetII::recv_response(PacketSender &sender, const NetworkInterface &iface) {
+PDU* EthernetII::recv_response(PacketSender& sender, const NetworkInterface& iface) {
     #if !defined(BSD) && !defined(__FreeBSD_kernel__)
         struct sockaddr_ll addr;
         memset(&addr, 0, sizeof(struct sockaddr_ll));
@@ -184,7 +195,7 @@ PDU *EthernetII::recv_response(PacketSender &sender, const NetworkInterface &ifa
         addr.sll_protocol = Endian::host_to_be<uint16_t>(ETH_P_ALL);
         addr.sll_halen = address_type::address_size;
         addr.sll_ifindex = iface.id();
-        memcpy(&(addr.sll_addr), _eth.dst_mac, address_type::address_size);
+        memcpy(&(addr.sll_addr), header_.dst_mac, address_type::address_size);
 
         return sender.recv_l2(*this, (struct sockaddr*)&addr, (uint32_t)sizeof(addr));
     #else
@@ -192,4 +203,5 @@ PDU *EthernetII::recv_response(PacketSender &sender, const NetworkInterface &ifa
     #endif
 }
 #endif // _WIN32
-}
+
+} // Tins

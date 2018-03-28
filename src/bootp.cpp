@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,104 +27,105 @@
  *
  */
 
-#include <stdexcept>
 #include <cstring>
-#include <cassert>
-#include "bootp.h"
-#include "exceptions.h"
+#include <tins/bootp.h>
+#include <tins/exceptions.h>
+#include <tins/memory_helpers.h>
+
+using std::copy;
+
+using Tins::Memory::InputMemoryStream;
+using Tins::Memory::OutputMemoryStream;
 
 namespace Tins{
+
 BootP::BootP() 
-: _vend(64) {
-    std::memset(&_bootp, 0, sizeof(bootphdr));
+: bootp_(), vend_(64) {
+
 }
 
-BootP::BootP(const uint8_t *buffer, uint32_t total_sz, uint32_t vend_field_size) 
-: _vend(vend_field_size) 
-{
-    if(total_sz < sizeof(bootphdr) + vend_field_size)
+BootP::BootP(const uint8_t* buffer, uint32_t total_sz, uint32_t vend_field_size) 
+: vend_(vend_field_size) {
+    InputMemoryStream stream(buffer, total_sz);
+    stream.read(bootp_);
+    if (!stream.can_read(vend_field_size)) {
         throw malformed_packet();
-    std::memcpy(&_bootp, buffer, sizeof(bootphdr));
-    buffer += sizeof(bootphdr);
-    total_sz -= sizeof(bootphdr);
-    _vend.assign(buffer, buffer + vend_field_size);
-    // Maybe RawPDU on what is left on the buffer?...
+    }
+    stream.read(vend_, vend_field_size);
 }
 
 uint32_t BootP::header_size() const {
-    return static_cast<uint32_t>(sizeof(bootphdr) + _vend.size());
+    return static_cast<uint32_t>(sizeof(bootp_) + vend_.size());
 }
 
-void BootP::opcode(uint8_t new_opcode) {
-    _bootp.opcode = new_opcode;
+void BootP::opcode(uint8_t code) {
+    bootp_.opcode = code;
 }
 
-void BootP::htype(uint8_t new_htype) {
-    _bootp.htype = new_htype;
+void BootP::htype(uint8_t type) {
+    bootp_.htype = type;
 }
 
-void BootP::hlen(uint8_t new_hlen) {
-    _bootp.hlen = new_hlen;
+void BootP::hlen(uint8_t length) {
+    bootp_.hlen = length;
 }
 
-void BootP::hops(uint8_t new_hops) {
-    _bootp.hops = new_hops;
+void BootP::hops(uint8_t count) {
+    bootp_.hops = count;
 }
 
-void BootP::xid(uint32_t new_xid) {
-    _bootp.xid = Endian::host_to_be(new_xid);
+void BootP::xid(uint32_t identifier) {
+    bootp_.xid = Endian::host_to_be(identifier);
 }
 
-void BootP::secs(uint16_t new_secs) {
-    _bootp.secs = Endian::host_to_be(new_secs);
+void BootP::secs(uint16_t value) {
+    bootp_.secs = Endian::host_to_be(value);
 }
 
-void BootP::padding(uint16_t new_padding) {
-    _bootp.padding = Endian::host_to_be(new_padding);
+void BootP::padding(uint16_t value) {
+    bootp_.padding = Endian::host_to_be(value);
 }
 
-void BootP::ciaddr(ipaddress_type new_ciaddr) {
-    _bootp.ciaddr = new_ciaddr;
+void BootP::ciaddr(ipaddress_type address) {
+    bootp_.ciaddr = address;
 }
 
-void BootP::yiaddr(ipaddress_type new_yiaddr) {
-    _bootp.yiaddr = new_yiaddr;
+void BootP::yiaddr(ipaddress_type address) {
+    bootp_.yiaddr = address;
 }
 
-void BootP::siaddr(ipaddress_type new_siaddr) {
-    _bootp.siaddr = new_siaddr;
+void BootP::siaddr(ipaddress_type address) {
+    bootp_.siaddr = address;
 }
 
-void BootP::giaddr(ipaddress_type new_giaddr) {
-    _bootp.giaddr = new_giaddr;
+void BootP::giaddr(ipaddress_type address) {
+    bootp_.giaddr = address;
 }
 
-void BootP::sname(const uint8_t *new_sname) {
-    //std::memcpy(_bootp.sname, new_sname, sizeof(_bootp.sname));
-    std::copy(new_sname, new_sname + sizeof(_bootp.sname), _bootp.sname);
+void BootP::sname(const uint8_t* new_sname) {
+    copy(new_sname, new_sname + sizeof(bootp_.sname), bootp_.sname);
 }
 
-void BootP::file(const uint8_t *new_file) {
-    //std::memcpy(_bootp.file, new_file, sizeof(_bootp.file));
-    std::copy(new_file, new_file + sizeof(_bootp.file), _bootp.file);
+void BootP::file(const uint8_t* new_file) {
+    copy(new_file, new_file + sizeof(bootp_.file), bootp_.file);
 }
 
-void BootP::vend(const vend_type &new_vend) {
-    _vend = new_vend;
+void BootP::vend(const vend_type& newvend_) {
+    vend_ = newvend_;
 }
 
-void BootP::write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *parent) {
-    #ifdef TINS_DEBUG
-    assert(total_sz >= sizeof(bootphdr) + _vend.size());
-    #endif
-    std::memcpy(buffer, &_bootp, sizeof(bootphdr));
-    std::copy(_vend.begin(), _vend.end(), buffer + sizeof(bootphdr));
+void BootP::write_serialization(uint8_t* buffer, uint32_t total_sz) {
+    OutputMemoryStream stream(buffer, total_sz);
+    stream.write(bootp_);
+    stream.write(vend_.begin(), vend_.end());
 }
 
-bool BootP::matches_response(const uint8_t *ptr, uint32_t total_sz) const {
-    if(total_sz < sizeof(bootphdr))
+bool BootP::matches_response(const uint8_t* ptr, uint32_t total_sz) const {
+    if (total_sz < sizeof(bootp_)) {
         return false;
-    const bootphdr *bootp_ptr = (const bootphdr *)ptr;
-    return bootp_ptr->xid == _bootp.xid;
+    }
+    const bootp_header* bootp_ptr = (const bootp_header *)ptr;
+    return bootp_ptr->xid == bootp_.xid;
 }
-}
+
+} // Tins

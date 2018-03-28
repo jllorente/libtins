@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,108 +27,88 @@
  *
  */
 
-#include "crypto.h"
+#include <tins/crypto.h>
 
-#ifdef HAVE_DOT11
+#ifdef TINS_HAVE_DOT11
 
-#ifdef HAVE_WPA2_DECRYPTION
+#include <algorithm>
+#ifdef TINS_HAVE_WPA2_DECRYPTION
     #include <openssl/evp.h>
     #include <openssl/hmac.h>
     #include <openssl/aes.h>
-#endif // HAVE_WPA2_DECRYPTION
-#include "dot11/dot11_data.h"
-#include "dot11/dot11_beacon.h"
-#include "exceptions.h"
+#endif // TINS_HAVE_WPA2_DECRYPTION
+#include <tins/snap.h>
+#include <tins/rawpdu.h>
+#include <tins/dot11/dot11_data.h>
+#include <tins/dot11/dot11_beacon.h>
+#include <tins/exceptions.h>
+#include <tins/utils/checksum_utils.h>
+#include <tins/detail/type_traits.h>
+
+using std::string;
+using std::vector;
+using std::make_pair;
+using std::equal;
+using std::copy;
+using std::min;
+using std::max;
+using std::lexicographical_compare;
+using std::fill;
+using std::runtime_error;
 
 namespace Tins {
+namespace Internals {
+
+template<size_t n>
+class byte_array {
+public:
+    typedef uint8_t* iterator;
+    typedef const uint8_t* const_iterator;
+
+    byte_array() {
+        std::memset(data, 0, size());
+    }
+
+    uint8_t& operator[](size_t i) {
+        return data[i];
+    }
+
+    uint8_t operator[](size_t i) const{
+        return data[i];
+    }
+
+    iterator begin() {
+        return data;
+    }
+
+    iterator end() {
+        return data + n;
+    }
+
+    const_iterator begin() const {
+        return data;
+    }
+
+    const_iterator end() const {
+        return data + n;
+    }
+
+    size_t size() const {
+        return n;
+    }
+private:
+    uint8_t data[n];
+};
+
+} // Internals
+
 namespace Crypto {
-WEPDecrypter::WEPDecrypter() 
-: key_buffer(4) {
-    
-}
 
-void WEPDecrypter::add_password(const address_type &addr, const std::string &password) {
-    passwords[addr] = password;
-    key_buffer.resize(std::max(3 + password.size(), key_buffer.size()));
-}
-
-void WEPDecrypter::remove_password(const address_type &addr) {
-    passwords.erase(addr); 
-}
-
-bool WEPDecrypter::decrypt(PDU &pdu) {
-    Dot11Data *dot11 = pdu.find_pdu<Dot11Data>();
-    if(dot11) {
-        RawPDU *raw = dot11->find_pdu<RawPDU>();
-        if(raw) {
-            address_type addr;
-            if(!dot11->from_ds() && !dot11->to_ds())
-                addr = dot11->addr3();
-            else if(!dot11->from_ds() && dot11->to_ds())
-                addr = dot11->addr1();
-            else if(dot11->from_ds() && !dot11->to_ds())
-                addr = dot11->addr2();
-            else
-                // ????
-                addr = dot11->addr3();
-            passwords_type::iterator it = passwords.find(addr);
-            if(it != passwords.end()) {
-                dot11->inner_pdu(decrypt(*raw, it->second));
-                // If its valid, then return true
-                if(dot11->inner_pdu()) {
-                    // it's no longer encrypted.
-                    dot11->wep(0);
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
-}
-
-PDU *WEPDecrypter::decrypt(RawPDU &raw, const std::string &password) {
-    RawPDU::payload_type &pload = raw.payload();
-    // We require at least the IV, the encrypted checksum and something to decrypt
-    if(pload.size() <= 8)
-        return 0;
-    std::copy(pload.begin(), pload.begin() + 3, key_buffer.begin());
-    std::copy(password.begin(), password.end(), key_buffer.begin() + 3);
-    
-    // Generate the key
-    RC4Key key(key_buffer.begin(), key_buffer.begin() + password.size() + 3);
-    rc4(pload.begin() + 4, pload.end(), key, pload.begin());
-    uint32_t payload_size = static_cast<uint32_t>(pload.size() - 8);
-    uint32_t crc = Utils::crc32(&pload[0], payload_size);
-    if(pload[pload.size() - 8] != (crc & 0xff) ||
-        pload[pload.size() - 7] != ((crc >> 8) & 0xff) ||
-        pload[pload.size() - 6] != ((crc >> 16) & 0xff) ||
-        pload[pload.size() - 5] != ((crc >> 24) & 0xff))
-        return 0;
-    
-    try {
-        return new SNAP(&pload[0], payload_size);
-    }
-    catch(std::runtime_error&) {
-        return 0;
-    }
-}
-
-#ifdef HAVE_WPA2_DECRYPTION
-// WPA2Decrypter
-
-using WPA2::SessionKeys;
-
-const HWAddress<6> &min(const HWAddress<6>& lhs, const HWAddress<6>& rhs) {
-    return lhs < rhs ? lhs : rhs;
-}
-
-const HWAddress<6> &max(const HWAddress<6>& lhs, const HWAddress<6>& rhs) {
-    return lhs < rhs ? rhs : lhs;
-}
+// Helper stuff
 
 template<typename InputIterator1, typename InputIterator2, typename OutputIterator>
 void xor_range(InputIterator1 src1, InputIterator2 src2, OutputIterator dst, size_t sz) {
-    for(size_t i = 0; i < sz; ++i) {
+    for (size_t i = 0; i < sz; ++i) {
         *dst++ = *src1++ ^ *src2++;
     }
 }
@@ -224,13 +204,208 @@ uint16_t lower_byte(uint16_t value) {
     return value & 0xff;
 }
 
-HWAddress<6> get_bssid(const Dot11Data &dot11) {
-    if(dot11.from_ds() && !dot11.to_ds())
+// RC4 classes/functions
+
+struct RC4Key {
+    static const size_t data_size = 256;
+
+    template<typename ForwardIterator>
+    RC4Key(ForwardIterator start, ForwardIterator end) {
+        for (size_t i = 0; i < data_size; ++i) {
+            data[i] = static_cast<uint8_t>(i);
+        }
+        size_t j = 0;
+        ForwardIterator iter = start;
+        for (size_t i = 0; i < data_size; ++i) {
+            j = (j + data[i] + *iter++) % 256;
+            if(iter == end) {
+                iter = start;
+            }
+            std::swap(data[i], data[j]);
+        }
+    }
+
+    static RC4Key from_packet(const Dot11Data& dot11, const RawPDU& raw,
+                              const vector<uint8_t>& ptk) { 
+        const RawPDU::payload_type& pload = raw.payload();
+        const uint8_t* tk = &ptk[0] + 32;
+        Internals::byte_array<16> rc4_key;
+        uint16_t ppk[6];
+        const Dot11::address_type addr = dot11.addr2();
+        // Phase 1
+        ppk[0] = join_bytes(pload[4], pload[5]);
+        ppk[1] = join_bytes(pload[6], pload[7]);
+        ppk[2] = join_bytes(addr[1], addr[0]);
+        ppk[3] = join_bytes(addr[3], addr[2]);
+        ppk[4] = join_bytes(addr[5], addr[4]);
+
+        for (size_t i = 0; i < 4; ++i) {
+            ppk[0] += sbox(ppk[4] ^ join_bytes(tk[1], tk[0]));
+            ppk[1] += sbox(ppk[0] ^ join_bytes(tk[5], tk[4]));
+            ppk[2] += sbox(ppk[1] ^ join_bytes(tk[9], tk[8]));
+            ppk[3] += sbox(ppk[2] ^ join_bytes(tk[13], tk[12]));
+            ppk[4] += sbox(ppk[3] ^ join_bytes(tk[1], tk[0])) + 2*i;
+            ppk[0] += sbox(ppk[4] ^ join_bytes(tk[3], tk[2]));
+            ppk[1] += sbox(ppk[0] ^ join_bytes(tk[7], tk[6]));
+            ppk[2] += sbox(ppk[1] ^ join_bytes(tk[11], tk[10]));
+            ppk[3] += sbox(ppk[2] ^ join_bytes(tk[15], tk[14]));
+            ppk[4] += sbox(ppk[3] ^ join_bytes(tk[3], tk[2])) + 2*i + 1;
+        }
+
+        // Phase 2, step 1
+        ppk[5] = ppk[4] + join_bytes(pload[0], pload[2]);
+
+        // Phase 2, step 2
+        ppk[0] += sbox(ppk[5] ^ join_bytes(tk[1], tk[0]));
+        ppk[1] += sbox(ppk[0] ^ join_bytes(tk[3], tk[2]));
+        ppk[2] += sbox(ppk[1] ^ join_bytes(tk[5], tk[4]));
+        ppk[3] += sbox(ppk[2] ^ join_bytes(tk[7], tk[6]));
+        ppk[4] += sbox(ppk[3] ^ join_bytes(tk[9], tk[8]));
+        ppk[5] += sbox(ppk[4] ^ join_bytes(tk[11], tk[10]));
+
+        ppk[0] += rotate(ppk[5] ^ join_bytes(tk[13], tk[12]));
+        ppk[1] += rotate(ppk[0] ^ join_bytes(tk[15], tk[14]));
+        ppk[2] += rotate(ppk[1]);
+        ppk[3] += rotate(ppk[2]);
+        ppk[4] += rotate(ppk[3]);
+        ppk[5] += rotate(ppk[4]);
+
+        // Phase 2, step 3
+        rc4_key[0] = upper_byte(join_bytes(pload[0], pload[2]));
+        rc4_key[1] = (rc4_key[0] | 0x20) & 0x7f;
+        rc4_key[2] = lower_byte(join_bytes(pload[0], pload[2]));
+        rc4_key[3] = lower_byte((ppk[5] ^ join_bytes(tk[1], tk[0])) >> 1);
+        rc4_key[4] = lower_byte(ppk[0]);
+        rc4_key[5] = upper_byte(ppk[0]);
+        rc4_key[6] = lower_byte(ppk[1]);
+        rc4_key[7] = upper_byte(ppk[1]);
+        rc4_key[8] = lower_byte(ppk[2]);
+        rc4_key[9] = upper_byte(ppk[2]);
+        rc4_key[10] = lower_byte(ppk[3]);
+        rc4_key[11] = upper_byte(ppk[3]);
+        rc4_key[12] = lower_byte(ppk[4]);
+        rc4_key[13] = upper_byte(ppk[4]);
+        rc4_key[14] = lower_byte(ppk[5]);
+        rc4_key[15] = upper_byte(ppk[5]);
+        return RC4Key(rc4_key.begin(), rc4_key.end());
+    }
+
+    uint8_t data[data_size];
+};
+
+template<typename ForwardIterator, typename OutputIterator>
+void rc4(ForwardIterator start, ForwardIterator end, RC4Key& key, OutputIterator output) {
+    size_t i = 0, j = 0;
+    while (start != end) {
+        i = (i + 1) % RC4Key::data_size;
+        j = (j + key.data[i]) % RC4Key::data_size;
+        std::swap(key.data[i], key.data[j]);
+        *output++ = *start++ ^ key.data[(key.data[i] + key.data[j]) % RC4Key::data_size];
+    }
+}
+
+// WEPDecrypter
+
+WEPDecrypter::WEPDecrypter() 
+: key_buffer_(4) {
+
+}
+
+void WEPDecrypter::add_password(const address_type& addr, const string& password) {
+    passwords_[addr] = password;
+    key_buffer_.resize(max(3 + password.size(), key_buffer_.size()));
+}
+
+void WEPDecrypter::remove_password(const address_type& addr) {
+    passwords_.erase(addr); 
+}
+
+bool WEPDecrypter::decrypt(PDU& pdu) {
+    Dot11Data* dot11 = pdu.find_pdu<Dot11Data>();
+    if (dot11) {
+        RawPDU* raw = dot11->find_pdu<RawPDU>();
+        if (raw) {
+            address_type addr;
+            if (!dot11->from_ds() && !dot11->to_ds()) {
+                addr = dot11->addr3();
+            }
+            else if (!dot11->from_ds() && dot11->to_ds()) {
+                addr = dot11->addr1();
+            }
+            else if (dot11->from_ds() && !dot11->to_ds()) {
+                addr = dot11->addr2();
+            }
+            else {
+                // ????
+                addr = dot11->addr3();
+            }
+            passwords_type::iterator it = passwords_.find(addr);
+            if (it != passwords_.end()) {
+                dot11->inner_pdu(decrypt(*raw, it->second));
+                // If its valid, then return true
+                if (dot11->inner_pdu()) {
+                    // it's no longer encrypted.
+                    dot11->wep(0);
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+PDU* WEPDecrypter::decrypt(RawPDU& raw, const string& password) {
+    RawPDU::payload_type& pload = raw.payload();
+    // We require at least the IV, the encrypted checksum and something to decrypt
+    if (pload.size() <= 8) {
+        return 0;
+    }
+    copy(pload.begin(), pload.begin() + 3, key_buffer_.begin());
+    copy(password.begin(), password.end(), key_buffer_.begin() + 3);
+
+    // Generate the key
+    RC4Key key(key_buffer_.begin(), key_buffer_.begin() + password.size() + 3);
+    rc4(pload.begin() + 4, pload.end(), key, pload.begin());
+    uint32_t payload_size = static_cast<uint32_t>(pload.size() - 8);
+    uint32_t crc = Utils::crc32(&pload[0], payload_size);
+    if (pload[pload.size() - 8] != (crc & 0xff) ||
+        pload[pload.size() - 7] != ((crc >> 8) & 0xff) ||
+        pload[pload.size() - 6] != ((crc >> 16) & 0xff) ||
+        pload[pload.size() - 5] != ((crc >> 24) & 0xff)) {
+        return 0;
+    }
+
+    try {
+        return new SNAP(&pload[0], payload_size);
+    }
+    catch (exception_base&) {
+        return 0;
+    }
+}
+
+#ifdef TINS_HAVE_WPA2_DECRYPTION
+// WPA2Decrypter
+
+using WPA2::SessionKeys;
+
+const HWAddress<6>& min(const HWAddress<6>& lhs, const HWAddress<6>& rhs) {
+    return lhs < rhs ? lhs : rhs;
+}
+
+const HWAddress<6>& max(const HWAddress<6>& lhs, const HWAddress<6>& rhs) {
+    return lhs < rhs ? rhs : lhs;
+}
+
+HWAddress<6> get_bssid(const Dot11Data& dot11) {
+    if (dot11.from_ds() && !dot11.to_ds()) {
         return dot11.addr3();
-    else if(!dot11.from_ds() && dot11.to_ds())
+    }
+    else if (!dot11.from_ds() && dot11.to_ds()) {
         return dot11.addr2();
-    else 
+    }
+    else {
         return dot11.addr2();
+    }
 }
 
 namespace WPA2 {
@@ -243,51 +418,55 @@ SessionKeys::SessionKeys() {
 }
 
 SessionKeys::SessionKeys(const ptk_type& ptk, bool is_ccmp) 
-: ptk(ptk), is_ccmp(is_ccmp) {
-    if (ptk.size() != PTK_SIZE) {
+: ptk_(ptk), is_ccmp_(is_ccmp) {
+    if (ptk_.size() != PTK_SIZE) {
         throw invalid_handshake();
     }
 }
 
-SessionKeys::SessionKeys(const RSNHandshake &hs, const pmk_type &pmk) 
-: ptk(PTK_SIZE) {
+SessionKeys::SessionKeys(const RSNHandshake& hs, const pmk_type& pmk) 
+: ptk_(PTK_SIZE), is_ccmp_(false) {
     if (pmk.size() != PMK_SIZE) {
         throw invalid_handshake();
     }
 
     uint8_t PKE[100] = "Pairwise key expansion";
     uint8_t MIC[20];
-    is_ccmp = (hs.handshake()[3].key_descriptor() == 2);
+    is_ccmp_ = (hs.handshake()[3].key_descriptor() == 2);
     
     min(hs.client_address(), hs.supplicant_address()).copy(PKE + 23);
     max(hs.client_address(), hs.supplicant_address()).copy(PKE + 29);
-    const uint8_t *nonce1 = hs.handshake()[1].nonce(), 
+    const uint8_t* nonce1 = hs.handshake()[1].nonce(), 
                   *nonce2 = hs.handshake()[2].nonce();
-    if(std::lexicographical_compare(nonce1, nonce1 + 32, nonce2, nonce2 + 32)) {
-        std::copy(nonce1, nonce1 + 32, PKE + 35);
-        std::copy(nonce2, nonce2 + 32, PKE + 67);
+    if (lexicographical_compare(nonce1, nonce1 + 32, nonce2, nonce2 + 32)) {
+        copy(nonce1, nonce1 + 32, PKE + 35);
+        copy(nonce2, nonce2 + 32, PKE + 67);
     }
     else {
-        std::copy(nonce2, nonce2 + 32, PKE + 35);
-        std::copy(nonce1, nonce1 + 32, PKE + 67);
+        copy(nonce2, nonce2 + 32, PKE + 35);
+        copy(nonce1, nonce1 + 32, PKE + 67);
     }
-    for(int i(0); i < 4; ++i) {
+    for (int i(0); i < 4; ++i) {
         PKE[99] = i;
-        HMAC(EVP_sha1(), &pmk[0], pmk.size(), PKE, 100, &ptk[0] + i * 20, 0);
+        HMAC(EVP_sha1(), &pmk[0], pmk.size(), PKE, 100, &ptk_[0] + i * 20, 0);
     }
-    PDU::serialization_type buffer = const_cast<RSNEAPOL&>(hs.handshake()[3]).serialize();
-    std::fill(buffer.begin() + 81, buffer.begin() + 81 + 16, 0);
-    if(is_ccmp)
-        HMAC(EVP_sha1(), &ptk[0], 16, &buffer[0], buffer.size(), MIC, 0);
-    else
-        HMAC(EVP_md5(), &ptk[0], 16, &buffer[0], buffer.size(), MIC, 0);
+    RSNEAPOL& last_hs = const_cast<RSNEAPOL&>(hs.handshake()[3]);
+    PDU::serialization_type buffer = last_hs.serialize();
+    fill(buffer.begin() + 81, buffer.begin() + 81 + 16, 0);
+    if (is_ccmp_) {
+        HMAC(EVP_sha1(), &ptk_[0], 16, &buffer[0], buffer.size(), MIC, 0);
+    }
+    else {
+        HMAC(EVP_md5(), &ptk_[0], 16, &buffer[0], buffer.size(), MIC, 0);
+    }
     
-    if(!std::equal(MIC, MIC + RSNEAPOL::mic_size, hs.handshake()[3].mic()))
+    if (!equal(MIC, MIC + RSNEAPOL::mic_size, last_hs.mic())) {
         throw invalid_handshake();
+    }
 }
 
-SNAP *SessionKeys::ccmp_decrypt_unicast(const Dot11Data &dot11, RawPDU &raw) const {
-    RawPDU::payload_type &pload = raw.payload();
+SNAP* SessionKeys::ccmp_decrypt_unicast(const Dot11Data& dot11, RawPDU& raw) const {
+    RawPDU::payload_type& pload = raw.payload();
     uint8_t MIC[16] = {0};
     uint8_t PN[6] = {
         pload[7],
@@ -301,8 +480,9 @@ SNAP *SessionKeys::ccmp_decrypt_unicast(const Dot11Data &dot11, RawPDU &raw) con
     uint8_t AAD[32] = {0};
     AAD[0] = 0;
     AAD[1] = 22 + 6 * int(dot11.from_ds() && dot11.to_ds());
-    if(dot11.subtype() == Dot11::QOS_DATA_DATA) 
+    if (dot11.subtype() == Dot11::QOS_DATA_DATA)  {
         AAD[1] += 2;
+    }
     AAD[2] = dot11.protocol() | (dot11.type() << 2) | ((dot11.subtype() << 4) & 0x80);
     AAD[3] = 0x40 | dot11.to_ds() | (dot11.from_ds() << 1) |
             (dot11.more_frag() << 2) | (dot11.order() << 7);
@@ -313,11 +493,12 @@ SNAP *SessionKeys::ccmp_decrypt_unicast(const Dot11Data &dot11, RawPDU &raw) con
     AAD[22] = dot11.frag_num();
     AAD[23] = 0;
     
-    if(dot11.from_ds() && dot11.to_ds())
+    if (dot11.from_ds() && dot11.to_ds()) {
         dot11.addr4().copy(AAD + 24);
+    }
     
     AES_KEY ctx;
-    AES_set_encrypt_key(&ptk[0] + 32, 128, &ctx);
+    AES_set_encrypt_key(&ptk_[0] + 32, 128, &ctx);
     uint8_t crypted_block[16];
     size_t total_sz = raw.payload_size() - 16, offset = 8, blocks = (total_sz + 15) / 16;
     
@@ -325,10 +506,16 @@ SNAP *SessionKeys::ccmp_decrypt_unicast(const Dot11Data &dot11, RawPDU &raw) con
     counter[0] = 0x59;
     counter[1] = 0;
     dot11.addr2().copy(counter + 2);
-    std::copy(PN, PN + 6, counter + 8);
+    copy(PN, PN + 6, counter + 8);
     counter[14] = (total_sz >> 8) & 0xff;
     counter[15] = total_sz & 0xff;
     
+    if (dot11.subtype() == Dot11::QOS_DATA_DATA) {
+        const uint32_t offset = (dot11.from_ds() && dot11.to_ds()) ? 30 : 24;
+        AAD[offset] = static_cast<const Dot11QoSData&>(dot11).qos_control() & 0x0f;
+        counter[1] = AAD[offset];
+    }
+
     AES_encrypt(counter, MIC, &ctx);
     xor_range(MIC, AAD, MIC, 16);
     AES_encrypt(MIC, MIC, &ctx);
@@ -339,12 +526,13 @@ SNAP *SessionKeys::ccmp_decrypt_unicast(const Dot11Data &dot11, RawPDU &raw) con
     counter[14] = counter[15] = 0;
     AES_encrypt(counter, crypted_block, &ctx);
     uint8_t nice_MIC[8];
-    std::copy(pload.begin() + pload.size() - 8, pload.end(), nice_MIC);
+    copy(pload.begin() + pload.size() - 8, pload.end(), nice_MIC);
     xor_range(crypted_block, nice_MIC, nice_MIC, 8);
-    for(size_t i = 1; i <= blocks; ++i) {
+    for (size_t i = 1; i <= blocks; ++i) {
         size_t block_sz = (i == blocks) ? (total_sz % 16) : 16;
-        if(block_sz == 0)
+        if (block_sz == 0) {
             block_sz = 16;
+        }
         counter[14] = (i >> 8) & 0xff;
         counter[15] = i & 0xff;
         AES_encrypt(counter, crypted_block, &ctx );
@@ -355,111 +543,52 @@ SNAP *SessionKeys::ccmp_decrypt_unicast(const Dot11Data &dot11, RawPDU &raw) con
         AES_encrypt(MIC, MIC, &ctx);   
         offset += block_sz;
     }
-    return (std::equal(nice_MIC, nice_MIC + sizeof(nice_MIC), MIC)) ? 
-        new SNAP(&pload[0], total_sz) : 
-        0;
-}
-
-RC4Key SessionKeys::generate_rc4_key(const Dot11Data &dot11, const RawPDU &raw) const {
-    const RawPDU::payload_type &pload = raw.payload();
-    const uint8_t *tk = &ptk[0] + 32;
-    Internals::byte_array<16> rc4_key;
-    uint16_t ppk[6];
-    const Dot11::address_type addr = dot11.addr2();
-    // Phase 1
-    ppk[0] = join_bytes(pload[4], pload[5]);
-    ppk[1] = join_bytes(pload[6], pload[7]);
-    ppk[2] = join_bytes(addr[1], addr[0]);
-    ppk[3] = join_bytes(addr[3], addr[2]);
-    ppk[4] = join_bytes(addr[5], addr[4]);
-    
-    for(size_t i = 0; i < 4; ++i) {
-        ppk[0] += sbox(ppk[4] ^ join_bytes(tk[1], tk[0]));
-        ppk[1] += sbox(ppk[0] ^ join_bytes(tk[5], tk[4]));
-        ppk[2] += sbox(ppk[1] ^ join_bytes(tk[9], tk[8]));
-        ppk[3] += sbox(ppk[2] ^ join_bytes(tk[13], tk[12]));
-        ppk[4] += sbox(ppk[3] ^ join_bytes(tk[1], tk[0])) + 2*i;
-        ppk[0] += sbox(ppk[4] ^ join_bytes(tk[3], tk[2]));
-        ppk[1] += sbox(ppk[0] ^ join_bytes(tk[7], tk[6]));
-        ppk[2] += sbox(ppk[1] ^ join_bytes(tk[11], tk[10]));
-        ppk[3] += sbox(ppk[2] ^ join_bytes(tk[15], tk[14]));
-        ppk[4] += sbox(ppk[3] ^ join_bytes(tk[3], tk[2])) + 2*i + 1;
+    if (equal(nice_MIC, nice_MIC + sizeof(nice_MIC), MIC)) {
+        return new SNAP(&pload[0], total_sz);
     }
-
-    // Phase 2, step 1
-    ppk[5] = ppk[4] + join_bytes(pload[0], pload[2]);
-    
-    // Phase 2, step 2
-    ppk[0] += sbox(ppk[5] ^ join_bytes(tk[1], tk[0]));
-    ppk[1] += sbox(ppk[0] ^ join_bytes(tk[3], tk[2]));
-    ppk[2] += sbox(ppk[1] ^ join_bytes(tk[5], tk[4]));
-    ppk[3] += sbox(ppk[2] ^ join_bytes(tk[7], tk[6]));
-    ppk[4] += sbox(ppk[3] ^ join_bytes(tk[9], tk[8]));
-    ppk[5] += sbox(ppk[4] ^ join_bytes(tk[11], tk[10]));
-    
-    ppk[0] += rotate(ppk[5] ^ join_bytes(tk[13], tk[12]));
-    ppk[1] += rotate(ppk[0] ^ join_bytes(tk[15], tk[14]));
-    ppk[2] += rotate(ppk[1]);
-    ppk[3] += rotate(ppk[2]);
-    ppk[4] += rotate(ppk[3]);
-    ppk[5] += rotate(ppk[4]);
-    
-    // Phase 2, step 3
-    rc4_key[0] = upper_byte(join_bytes(pload[0], pload[2]));
-    rc4_key[1] = (rc4_key[0] | 0x20) & 0x7f;
-    rc4_key[2] = lower_byte(join_bytes(pload[0], pload[2]));
-    rc4_key[3] = lower_byte((ppk[5] ^ join_bytes(tk[1], tk[0])) >> 1);
-    rc4_key[4] = lower_byte(ppk[0]);
-    rc4_key[5] = upper_byte(ppk[0]);
-    rc4_key[6] = lower_byte(ppk[1]);
-    rc4_key[7] = upper_byte(ppk[1]);
-    rc4_key[8] = lower_byte(ppk[2]);
-    rc4_key[9] = upper_byte(ppk[2]);
-    rc4_key[10] = lower_byte(ppk[3]);
-    rc4_key[11] = upper_byte(ppk[3]);
-    rc4_key[12] = lower_byte(ppk[4]);
-    rc4_key[13] = upper_byte(ppk[4]);
-    rc4_key[14] = lower_byte(ppk[5]);
-    rc4_key[15] = upper_byte(ppk[5]);
-    return RC4Key(rc4_key.begin(), rc4_key.end());
+    else {
+        return 0;
+    }
 }
 
-SNAP *SessionKeys::tkip_decrypt_unicast(const Dot11Data &dot11, RawPDU &raw) const {
+SNAP* SessionKeys::tkip_decrypt_unicast(const Dot11Data& dot11, RawPDU& raw) const {
     // at least 20 bytes for IV + crc + stuff
-    if(raw.payload_size() <= 20)
+    if (raw.payload_size() <= 20) {
         return 0;
-    Crypto::RC4Key key = generate_rc4_key(dot11, raw);
-    RawPDU::payload_type &pload = raw.payload();
+    }
+    Crypto::RC4Key key = RC4Key::from_packet(dot11, raw, ptk_);
+    RawPDU::payload_type& pload = raw.payload();
     rc4(pload.begin() + 8, pload.end(), key, pload.begin());
 
     uint32_t crc = Utils::crc32(&pload[0], pload.size() - 12);
-    if(pload[pload.size() - 12] != (crc & 0xff) ||
+    if (pload[pload.size() - 12] != (crc & 0xff) ||
         pload[pload.size() - 11] != ((crc >> 8) & 0xff) ||
         pload[pload.size() - 10] != ((crc >> 16) & 0xff) ||
-        pload[pload.size() - 9] != ((crc >> 24) & 0xff))
+        pload[pload.size() - 9] != ((crc >> 24) & 0xff)) {
         return 0;
+    }
 
     return new SNAP(&pload[0], pload.size() - 20);
 }
 
-SNAP *SessionKeys::decrypt_unicast(const Dot11Data &dot11, RawPDU &raw) const {
-    return is_ccmp ? 
-        ccmp_decrypt_unicast(dot11, raw) :
-        tkip_decrypt_unicast(dot11, raw);
+SNAP* SessionKeys::decrypt_unicast(const Dot11Data& dot11, RawPDU& raw) const {
+    return is_ccmp_ ? 
+           ccmp_decrypt_unicast(dot11, raw) :
+           tkip_decrypt_unicast(dot11, raw);
 }
 
 const SessionKeys::ptk_type& SessionKeys::get_ptk() const {
-    return ptk;
+    return ptk_;
 }
 
 bool SessionKeys::uses_ccmp() const {
-    return is_ccmp;
+    return is_ccmp_;
 }
 
 // supplicant_data
 
-SupplicantData::SupplicantData(const std::string &psk, const std::string &ssid)
-: pmk_(SessionKeys::PMK_SIZE) {
+SupplicantData::SupplicantData(const string& psk, const string& ssid)
+: pmk_(SessionKeys::PMK_SIZE), ssid_(ssid) {
     PKCS5_PBKDF2_HMAC_SHA1(
         psk.c_str(), 
         psk.size(), 
@@ -471,106 +600,141 @@ SupplicantData::SupplicantData(const std::string &psk, const std::string &ssid)
     );
 }
 
-const SupplicantData::pmk_type &SupplicantData::pmk() const {
+const SupplicantData::pmk_type& SupplicantData::pmk() const {
     return pmk_;
 }
-} // namespace WPA2
 
-void WPA2Decrypter::add_ap_data(const std::string &psk, const std::string &ssid) {
-    pmks.insert(std::make_pair(ssid, WPA2::SupplicantData(psk, ssid)));
+const string& SupplicantData::ssid() const {
+    return ssid_;
 }
 
-void WPA2Decrypter::add_ap_data(const std::string &psk, const std::string &ssid,
-  const address_type &addr) 
-{
+} // namespace WPA2
+
+void WPA2Decrypter::add_ap_data(const string& psk, const string& ssid) {
+    pmks_.insert(make_pair(ssid, WPA2::SupplicantData(psk, ssid)));
+}
+
+void WPA2Decrypter::add_ap_data(const string& psk, 
+                                const string& ssid,
+                                const address_type& addr) {
     add_ap_data(psk, ssid);
     add_access_point(ssid, addr);
 }
 
-void WPA2Decrypter::add_access_point(const std::string &ssid, const address_type &addr) {
-    pmks_map::const_iterator it = pmks.find(ssid);
-    if(it == pmks.end()) 
-        throw std::runtime_error("supplicant data not registered");
-    aps.insert(std::make_pair(addr, it->second));
+void WPA2Decrypter::add_access_point(const string& ssid, const address_type& addr) {
+    pmks_map::const_iterator it = pmks_.find(ssid);
+    if (it == pmks_.end()) {
+        throw runtime_error("Supplicant data not registered");
+    }
+    aps_.insert(make_pair(addr, it->second));
+    
+    #ifdef TINS_HAVE_WPA2_CALLBACKS
+        if (ap_found_callback_) {
+            ap_found_callback_(ssid, addr);
+        }
+    #endif // TINS_HAVE_WPA2_CALLBACKS
 }
 
-void WPA2Decrypter::add_decryption_keys(const addr_pair& addresses, const SessionKeys& session_keys) {
+void WPA2Decrypter::add_decryption_keys(const addr_pair& addresses, 
+                                        const SessionKeys& session_keys) {
     addr_pair sorted_pair = make_addr_pair(addresses.first, addresses.second);
-    keys[sorted_pair] = session_keys;
+    keys_[sorted_pair] = session_keys;
 }
 
-void WPA2Decrypter::try_add_keys(const Dot11Data &dot11, const RSNHandshake &hs) {
+void WPA2Decrypter::try_add_keys(const Dot11Data& dot11, const RSNHandshake& hs) {
     bssids_map::const_iterator it = find_ap(dot11);
-    if(it != aps.end()) {
+    if (it != aps_.end()) {
         addr_pair addr_p = extract_addr_pair(dot11);
         try {
             SessionKeys session(hs, it->second.pmk());
-            keys[addr_p] = session;
+            keys_[addr_p] = session;
+            #ifdef TINS_HAVE_WPA2_CALLBACKS
+                if (handshake_captured_callback_) {
+                    address_type bssid = dot11.bssid_addr();
+                    address_type client = (bssid == addr_p.first) ? addr_p.second
+                                                                  : addr_p.first;
+                    handshake_captured_callback_(it->second.ssid(), bssid, client);
+                }
+            #endif // TINS_HAVE_WPA2_CALLBACKS
         }
-        catch(WPA2::invalid_handshake&) { }
+        catch(WPA2::invalid_handshake&) {
+
+        }
     }
 }
 
 const WPA2Decrypter::keys_map& WPA2Decrypter::get_keys() const {
-    return keys;
+    return keys_;
 }
 
-WPA2Decrypter::addr_pair WPA2Decrypter::extract_addr_pair(const Dot11Data &dot11) {
-    if(dot11.from_ds() && !dot11.to_ds())
+WPA2Decrypter::addr_pair WPA2Decrypter::extract_addr_pair(const Dot11Data& dot11) {
+    if (dot11.from_ds() && !dot11.to_ds()) {
         return make_addr_pair(dot11.addr2(), dot11.addr3());
-    else if(!dot11.from_ds() && dot11.to_ds())
-        return make_addr_pair(dot11.addr1(), dot11.addr2());
-    else 
-        return make_addr_pair(dot11.addr2(), dot11.addr3());
-}
-
-WPA2Decrypter::addr_pair WPA2Decrypter::extract_addr_pair_dst(const Dot11Data &dot11) {
-    if(dot11.from_ds() && !dot11.to_ds())
-        return make_addr_pair(dot11.addr1(), dot11.addr2());
-    else if(!dot11.from_ds() && dot11.to_ds())
-        return make_addr_pair(dot11.addr1(), dot11.addr3());
-    else 
-        return make_addr_pair(dot11.addr1(), dot11.addr3());
-}
-
-WPA2Decrypter::bssids_map::const_iterator WPA2Decrypter::find_ap(const Dot11Data &dot11) {
-    if(dot11.from_ds() && !dot11.to_ds())
-        return aps.find(dot11.addr2());
-    else if(!dot11.from_ds() && dot11.to_ds())
-        return aps.find(dot11.addr1());
-    else 
-        return aps.find(dot11.addr3());
-}
-
-bool WPA2Decrypter::decrypt(PDU &pdu) {
-    if(capturer.process_packet(pdu)) {
-        try_add_keys(pdu.rfind_pdu<Dot11Data>(), capturer.handshakes().front());
-        capturer.clear_handshakes();
     }
-    else if(const Dot11Beacon *beacon = pdu.find_pdu<Dot11Beacon>()) {
-        if(aps.count(beacon->addr3()) == 0) {
+    else if (!dot11.from_ds() && dot11.to_ds()) {
+        return make_addr_pair(dot11.addr1(), dot11.addr2());
+    }
+    else {
+        return make_addr_pair(dot11.addr2(), dot11.addr3());
+    }
+}
+
+WPA2Decrypter::addr_pair WPA2Decrypter::extract_addr_pair_dst(const Dot11Data& dot11) {
+    if (dot11.from_ds() && !dot11.to_ds()) {
+        return make_addr_pair(dot11.addr1(), dot11.addr2());
+    }
+    else if (!dot11.from_ds() && dot11.to_ds()) {
+        return make_addr_pair(dot11.addr1(), dot11.addr3());
+    }
+    else {
+        return make_addr_pair(dot11.addr1(), dot11.addr3());
+    }
+}
+
+WPA2Decrypter::bssids_map::const_iterator WPA2Decrypter::find_ap(const Dot11Data& dot11) {
+    if (dot11.from_ds() && !dot11.to_ds()) {
+        return aps_.find(dot11.addr2());
+    }
+    else if (!dot11.from_ds() && dot11.to_ds()) {
+        return aps_.find(dot11.addr1());
+    }
+    else {
+        return aps_.find(dot11.addr3());
+    }
+}
+
+bool WPA2Decrypter::decrypt(PDU& pdu) {
+    if (capturer_.process_packet(pdu)) {
+        try_add_keys(pdu.rfind_pdu<Dot11Data>(), capturer_.handshakes().front());
+        capturer_.clear_handshakes();
+    }
+    else if (const Dot11Beacon* beacon = pdu.find_pdu<Dot11Beacon>()) {
+        if (aps_.count(beacon->addr3()) == 0) {
             try {
-                std::string ssid = beacon->ssid();
-                if(pmks.count(ssid)) {
+                string ssid = beacon->ssid();
+                if (pmks_.count(ssid)) {
                     add_access_point(ssid, beacon->addr3());
                 }
             }
-            catch(option_not_found&) { }
+            catch(option_not_found&) {
+
+            }
         }
     }
     else {
-        Dot11Data *data = pdu.find_pdu<Dot11Data>();
-        RawPDU *raw = pdu.find_pdu<RawPDU>();
-        if(data && raw && data->wep()) {
+        Dot11Data* data = pdu.find_pdu<Dot11Data>();
+        RawPDU* raw = pdu.find_pdu<RawPDU>();
+        if (data && raw && data->wep()) {
             // search for the tuple (bssid, src_addr)
-            keys_map::const_iterator it = keys.find(extract_addr_pair(*data));
+            keys_map::const_iterator it = keys_.find(extract_addr_pair(*data));
             
             // search for the tuple (bssid, dst_addr) if the above didn't work
-            if(it == keys.end())
-                it = keys.find(extract_addr_pair_dst(*data));
-            if(it != keys.end()) {
-                SNAP *snap = it->second.decrypt_unicast(*data, *raw);
-                if(snap) {
+            if (it == keys_.end()) {
+                it = keys_.find(extract_addr_pair_dst(*data));
+            }
+            if (it != keys_.end()) {
+                SNAP* snap = it->second.decrypt_unicast(*data, *raw);
+                if (snap) {
                     data->inner_pdu(snap);
                     data->wep(0);
                     return true;
@@ -579,9 +743,23 @@ bool WPA2Decrypter::decrypt(PDU &pdu) {
         }
     }
     return false;
-} // namespace WPA2
-#endif // HAVE_WPA2_DECRYPTION
+}
+
+#ifdef TINS_HAVE_WPA2_CALLBACKS
+
+void WPA2Decrypter::handshake_captured_callback(const handshake_captured_callback_type& callback) {
+    handshake_captured_callback_ = callback;    
+}
+
+void WPA2Decrypter::ap_found_callback(const ap_found_callback_type& callback) {
+    ap_found_callback_ = callback;
+}
+
+#endif // TINS_HAVE_WPA2_CALLBACKS
+
+#endif // TINS_HAVE_WPA2_DECRYPTION
+
 } // namespace Crypto
 } // namespace Tins
 
-#endif // HAVE_DOT11
+#endif // TINS_HAVE_DOT11

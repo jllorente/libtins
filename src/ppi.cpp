@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,83 +27,81 @@
  *
  */
 
-#ifdef TINS_DEBUG
-    #include <cassert>
-#endif // TINS_DEBUG
-#include <algorithm>
 #include <cstring>
 #include <pcap.h>
-#include "dot11/dot11_base.h"
-#include "dot3.h"
-#include "ethernetII.h"
-#include "radiotap.h"
-#include "loopback.h"
-#include "sll.h"
-#include "ppi.h"
-#include "internals.h"
-#include "exceptions.h"
+#include <tins/dot11/dot11_base.h>
+#include <tins/dot3.h>
+#include <tins/ethernetII.h>
+#include <tins/radiotap.h>
+#include <tins/loopback.h>
+#include <tins/sll.h>
+#include <tins/ppi.h>
+#include <tins/exceptions.h>
+#include <tins/memory_helpers.h>
+#include <tins/detail/pdu_helpers.h>
+
+using Tins::Memory::InputMemoryStream;
 
 namespace Tins {
-PPI::PPI(const uint8_t *buffer, uint32_t total_sz) {
-    if(total_sz < sizeof(_header))
+
+PPI::PPI(const uint8_t* buffer, uint32_t total_sz) {
+    InputMemoryStream stream(buffer, total_sz);
+    stream.read(header_);
+    if (length() > total_sz || length() < sizeof(header_)) {
         throw malformed_packet();
-    std::memcpy(&_header, buffer, sizeof(_header));
-    if(length() > total_sz || length() < sizeof(_header))
-        throw malformed_packet();
-    buffer += sizeof(_header);
-    total_sz -= sizeof(_header);
-    // There are some options
-    const size_t options_length = length() - sizeof(_header);
-    if(options_length > 0) {
-        _data.assign(buffer, buffer + options_length);
-        buffer += options_length;
-        total_sz -= static_cast<uint32_t>(options_length);
     }
-    if(total_sz > 0) {
-        switch(dlt()) {
+    // There are some options
+    const size_t options_length = length() - sizeof(header_);
+    if (options_length > 0) {
+        stream.read(data_, options_length);
+    }
+    if (stream) {
+        switch (dlt()) {
             case DLT_IEEE802_11:
-                #ifdef HAVE_DOT11
-                    parse_80211(buffer, total_sz);
+                #ifdef TINS_HAVE_DOT11
+                    parse_80211(stream.pointer(), stream.size());
                 #else
                     throw protocol_disabled();
                 #endif
                 break;
             case DLT_EN10MB:
-                if(Internals::is_dot3(buffer, total_sz))
-                    inner_pdu(new Dot3(buffer, total_sz));
-                else
-                    inner_pdu(new EthernetII(buffer, total_sz));
+                if (Internals::is_dot3(stream.pointer(), stream.size())) {
+                    inner_pdu(new Dot3(stream.pointer(), stream.size()));
+                }
+                else {
+                    inner_pdu(new EthernetII(stream.pointer(), stream.size()));
+                }
                 break;
             case DLT_IEEE802_11_RADIO:
-                #ifdef HAVE_DOT11
-                    inner_pdu(new RadioTap(buffer, total_sz));
+                #ifdef TINS_HAVE_DOT11
+                    inner_pdu(new RadioTap(stream.pointer(), stream.size()));
                 #else
                     throw protocol_disabled();
                 #endif
                 break;
             case DLT_NULL:
-                inner_pdu(new Loopback(buffer, total_sz));
+                inner_pdu(new Loopback(stream.pointer(), stream.size()));
                 break;
             case DLT_LINUX_SLL:
-                inner_pdu(new Tins::SLL(buffer, total_sz));
+                inner_pdu(new Tins::SLL(stream.pointer(), stream.size()));
                 break;
         }
     }
 }
 
 uint32_t PPI::header_size() const {
-    return static_cast<uint32_t>(sizeof(_header) + _data.size());
+    return static_cast<uint32_t>(sizeof(header_) + data_.size());
 }
 
-void PPI::write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *) {
-    throw std::runtime_error("PPI serialization not supported");
+void PPI::write_serialization(uint8_t* /*buffer*/, uint32_t /*total_sz*/) {
+    throw pdu_not_serializable();
 }
 
 void PPI::parse_80211(const uint8_t* buffer, uint32_t total_sz) {
-    #ifdef HAVE_DOT11
-    if (_data.size() >= 13) {
+    #ifdef TINS_HAVE_DOT11
+    if (data_.size() >= 13) {
         // Is FCS-at-end on?
-        if ((_data[12] & 1) == 1) {
+        if ((data_[12] & 1) == 1) {
             // We need to reduce the total size since we're skipping the FCS
             if (total_sz < sizeof(uint32_t)) {
                 throw malformed_packet();
@@ -112,7 +110,7 @@ void PPI::parse_80211(const uint8_t* buffer, uint32_t total_sz) {
         }
     }
     inner_pdu(Dot11::from_bytes(buffer, total_sz));
-    #endif // HAVE_DOT11
+    #endif // TINS_HAVE_DOT11
 }
 
 } // Tins

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,15 +31,39 @@
 #define TINS_HWADDRESS_H
 
 #include <stdint.h>
-#include <stdexcept>
-#include <iterator>
-#include <algorithm>
-#include <iomanip>
-#include <iostream>
-#include <sstream>
-#include "cxxstd.h"
+#include <iosfwd>
+#include <string>
+#include <cstring>
+#include <tins/cxxstd.h>
+#include <tins/macros.h>
+#if TINS_IS_CXX11
+    // std::hash
+    #include <memory>
+#endif // TINS_IS_CXX11
 
 namespace Tins {
+namespace Internals {
+
+// Defined in hw_address.cpp
+/**
+ * \cond
+ */
+TINS_API std::string hw_address_to_string(const uint8_t* ptr, size_t count);
+
+TINS_API void string_to_hw_address(const std::string& hw_addr, uint8_t* output,
+                                   size_t output_size);
+
+TINS_API bool hw_address_equal_compare(const uint8_t* start1, const uint8_t* end1,
+                                      const uint8_t* start2);
+
+TINS_API bool hw_address_lt_compare(const uint8_t* start1, const uint8_t* end1,
+                                    const uint8_t* start2, const uint8_t* end2);
+
+/**
+ * \endcond
+ */
+} // Internals
+
 /**
  * \class HWAddress
  * \brief Represents a hardware address.
@@ -60,15 +84,13 @@ namespace Tins {
  * }
  * \endcode
  */
-template<size_t n, typename Storage = uint8_t>
+template<size_t n>
 class HWAddress {
 public:
     /**
      * \brief The type of the elements stored in the hardware address.
-     * 
-     * This is the same as the template parameter Storage.
      */
-    typedef Storage storage_type;
+    typedef uint8_t storage_type;
     
     /**
      * \brief The random access iterator type.
@@ -89,7 +111,7 @@ public:
     /**
      * \brief The broadcast address.
      */
-    static const HWAddress<n, Storage> broadcast;
+    static const HWAddress<n> broadcast;
     
     /**
      * \brief Constructor from a const storage_type*.
@@ -107,10 +129,12 @@ public:
      * \param ptr The pointer from which to construct this address.
      */
     HWAddress(const storage_type* ptr = 0) {
-        if(ptr)
-            std::copy(ptr, ptr + address_size, buffer);
-        else
-            std::fill(begin(), end(), storage_type());
+        if (ptr) {
+            std::memcpy(buffer_, ptr, address_size);
+        }
+        else {
+            std::memset(buffer_, 0, address_size);
+        }
     }
     
     /**
@@ -124,15 +148,15 @@ public:
      * 
      * \param address The hex-notation address to be parsed.
      */
-    HWAddress(const std::string &address) {
-        convert(address, buffer);
+    HWAddress(const std::string& address) {
+        Internals::string_to_hw_address(address, buffer_, n);
     }
     
     /**
      * \brief Overload provided basically for string literals.
      * 
      * This constructor takes a const char array of i elements in
-     * hex-notation. \sa HWAddress::HWAddress(const std::string &address)
+     * hex-notation. \sa HWAddress::HWAddress(const std::string& address)
      * 
      * This is mostly used when providing string literals. If this where 
      * a const char*, then there would be an ambiguity when providing 
@@ -143,7 +167,7 @@ public:
      */
     template<size_t i>
     HWAddress(const char (&address)[i]) {
-        convert(address, buffer);
+        Internals::string_to_hw_address(address, buffer_, n);
     }
     
     /**
@@ -159,19 +183,16 @@ public:
      * \param rhs The HWAddress to be constructed from.
      */
     template<size_t i>
-    HWAddress(const HWAddress<i> &rhs) {
-        // Fill extra bytes
-        std::fill(
-            // Copy as most as we can
-            std::copy(
-                rhs.begin(),
-                rhs.begin() + std::min(i, n),
-                begin()
-            ),
-            end(),
-            0
-        );
-        
+    HWAddress(const HWAddress<i>& rhs) {
+        size_t copy_threshold = i < n ? i : n;
+        for (size_t index = 0; index < n; ++index) {
+            if (index < copy_threshold) {
+                buffer_[index] = rhs[index];
+            }
+            else {
+                buffer_[index] = storage_type();
+            }
+        }
     }
     
     /**
@@ -181,7 +202,7 @@ public:
      * \return iterator.
      */
     iterator begin() {
-        return buffer;
+        return buffer_;
     }
     
     /**
@@ -191,7 +212,7 @@ public:
      * \return const_iterator.
      */
     const_iterator begin() const {
-        return buffer;
+        return buffer_;
     }
     
     /**
@@ -201,7 +222,7 @@ public:
      * \return iterator.
      */
     iterator end() {
-        return buffer + address_size;
+        return buffer_ + address_size;
     }
 
     /**
@@ -211,7 +232,7 @@ public:
      * \return const_iterator.
      */
     const_iterator end() const {
-        return buffer + address_size;
+        return buffer_ + address_size;
     }
     
     /**
@@ -221,8 +242,8 @@ public:
      * 
      * \return bool indicating whether addresses are equal.
      */
-    bool operator==(const HWAddress &rhs) const {
-        return std::equal(begin(), end(), rhs.buffer);
+    bool operator==(const HWAddress& rhs) const {
+        return Internals::hw_address_equal_compare(begin(), end(), rhs.begin());
     }
     
     /**
@@ -232,7 +253,7 @@ public:
      * 
      * \return bool indicating whether addresses are distinct.
      */
-    bool operator!=(const HWAddress &rhs) const {
+    bool operator!=(const HWAddress& rhs) const {
         return !(*this == rhs);
     }
     
@@ -243,8 +264,22 @@ public:
      * 
      * \return bool indicating whether this address is less-than rhs.
      */
-    bool operator<(const HWAddress &rhs) const {
-        return std::lexicographical_compare(begin(), end(), rhs.begin(), rhs.end());
+    bool operator<(const HWAddress& rhs) const {
+        return Internals::hw_address_lt_compare(begin(), end(), rhs.begin(), rhs.end());
+    }
+
+    /**
+     * \brief Apply a mask to this address
+     * 
+     * \param mask The mask to be applied
+     * \return The result of applying the mask to this address
+     */
+    HWAddress operator&(const HWAddress& mask) const {
+        HWAddress<n> output = *this;
+        for (size_t i = 0; i < n; ++i) {
+            output[i] = output[i] & mask[i];
+        }
+        return output;
     }
     
     /**
@@ -252,7 +287,7 @@ public:
      * 
      * This effectively returns the address_size constant.
      */
-    const size_t size() const {
+    size_t size() const {
         return address_size;
     }
     
@@ -260,14 +295,14 @@ public:
      * \brief Indicates whether this is a broadcast address.
      */
     bool is_broadcast() const {
-        return *this == broadcast;
+        return* this == broadcast;
     }
     
     /**
      * \brief Indicates whether this is a multicast address.
      */
     bool is_multicast() const {
-        return (buffer[0] & 0x01);
+        return (*begin() & 0x01);
     }
 
     /**
@@ -283,9 +318,7 @@ public:
      * \return std::string containing the hex-notation address.
      */
     std::string to_string() const {
-        std::ostringstream oss;
-        oss << *this;
-        return oss.str();
+        return Internals::hw_address_to_string(buffer_, size());
     }
 
     /**
@@ -294,7 +327,16 @@ public:
      * \param i The element to retrieve.
      */
     storage_type operator[](size_t i) const {
-        return buffer[i];
+        return begin()[i];
+    }
+
+    /**
+     * \brief Retrieves the i-th storage_type in this address.
+     *
+     * \param i The element to retrieve.
+     */
+    storage_type& operator[](size_t i) {
+        return begin()[i];
     }
     
     /**
@@ -304,14 +346,8 @@ public:
      * \param addr The parameter to be written.
      * \return std::ostream& pointing to the os parameter.
      */
-    friend std::ostream &operator<<(std::ostream &os, const HWAddress &addr) {
-        std::transform(
-            addr.begin(), 
-            addr.end() - 1,
-            std::ostream_iterator<std::string>(os, ":"),
-            &HWAddress::storage_to_string
-        );
-        return os << storage_to_string(addr.buffer[HWAddress::address_size-1]);
+    friend std::ostream& operator<<(std::ostream& os, const HWAddress& addr) {
+        return os << addr.to_string();
     }
     
     /**
@@ -337,71 +373,35 @@ public:
         return output;
     }
 private:
-    template<typename OutputIterator>
-    static void convert(const std::string &hw_addr, OutputIterator output);
-    
-    static std::string storage_to_string(storage_type element) {
-        std::ostringstream oss;
-        oss << std::hex;
-        if(element < 0x10)
-            oss << '0';
-        oss << (unsigned)element;
-        return oss.str();
+    static HWAddress<n> make_broadcast_address() {
+        // Build a buffer made of n 0xff bytes
+        uint8_t buffer[n];
+        for (size_t i = 0; i < n; ++i) {
+            buffer[i] = 0xff;
+        }
+        return HWAddress<n>(buffer);
     }
 
-    storage_type buffer[n];
+    storage_type buffer_[n];
 };
 
-template<size_t n, typename Storage>
-template<typename OutputIterator>
-void HWAddress<n, Storage>::convert(const std::string &hw_addr, 
-  OutputIterator output) 
-{
-    unsigned i(0);
-    size_t count(0);
-    storage_type tmp;
-    while(i < hw_addr.size() && count < n) {
-        const unsigned end = i+2;
-        tmp = storage_type();
-        while(i < end) {
-            if(hw_addr[i] >= 'a' && hw_addr[i] <= 'f')
-                tmp = (tmp << 4) | (hw_addr[i] - 'a' + 10);
-            else if(hw_addr[i] >= 'A' && hw_addr[i] <= 'F')
-                tmp = (tmp << 4) | (hw_addr[i] - 'A' + 10);
-            else if(hw_addr[i] >= '0' && hw_addr[i] <= '9')
-                tmp = (tmp << 4) | (hw_addr[i] - '0');
-            else if(hw_addr[i] == ':')
-                break;
-            else
-                throw std::runtime_error("Invalid byte found");
-            i++;
-        }
-        *(output++) = tmp;
-        count++;
-        if(i < hw_addr.size()) {
-            if(hw_addr[i] == ':')
-                i++;
-            else
-                throw std::runtime_error("Invalid separator");
-        }
-    }
-    while(count++ < n) {
-        *(output++) = storage_type();
-    }
-}
+template<size_t n>
+const HWAddress<n> HWAddress<n>::broadcast = make_broadcast_address();
 
-template<size_t n, typename Storage>
-const HWAddress<n, Storage> HWAddress<n, Storage>::broadcast("ff:ff:ff:ff:ff:ff");
 } // namespace Tins
+
 #if TINS_IS_CXX11
-namespace std
-{
+namespace std {
+
+// Specialization of std::hash for HWAddress
 template<size_t n>
 struct hash<Tins::HWAddress<n>> {
-    size_t operator()(const Tins::HWAddress<n> &addr) const {
+    size_t operator()(const Tins::HWAddress<n>& addr) const {
         return std::hash<std::string>()(addr.to_string());
     }
 };
+
 } // namespace std
-#endif
+#endif // TINS_IS_CXX11
+
 #endif // TINS_HWADDRESS_H

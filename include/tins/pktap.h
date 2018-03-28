@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,11 +30,18 @@
 #ifndef TINS_PKTAP_H
 #define TINS_PKTAP_H
 
-#include "pdu.h"
+#include <tins/pdu.h>
+#include <tins/macros.h>
+
+// This class is only available if pcap is enabled
+#ifdef TINS_HAVE_PCAP
 
 namespace Tins {
 
-class PKTAP : public PDU {
+/**
+ * \brief Represents a PKTAP PDU
+ */
+class TINS_API PKTAP : public PDU {
 public:
     /**
      * This PDU's flag.
@@ -63,12 +70,14 @@ public:
      * \brief Getter for the PDU's type.
      * \sa PDU::pdu_type
      */
-    PDUType pdu_type() const { return pdu_flag; }
+    PDUType pdu_type() const {
+        return pdu_flag;
+    }
 
     /**
      * \brief Returns the header size.
      *
-     * This metod overrides PDU::header_size. 
+     * This method overrides PDU::header_size. 
      * \sa PDU::header_size
      */
     uint32_t header_size() const;
@@ -76,7 +85,7 @@ public:
     /**
      * \sa PDU::clone
      */
-    PKTAP *clone() const {
+    PKTAP* clone() const {
         return new PKTAP(*this);
     }
 private:
@@ -98,12 +107,13 @@ private:
         uint8_t ecommand[20];
     };
 
-    void write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *parent);
-
+    void write_serialization(uint8_t* buffer, uint32_t total_sz);
 
     pktap_header header_;
 };
 
 } // Tins
+
+#endif // TINS_HAVE_PCAP
 
 #endif // TINS_PKTAP_H

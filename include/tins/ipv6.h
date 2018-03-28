@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,23 +30,28 @@
 #ifndef TINS_IPV6_h
 #define TINS_IPV6_h
 
-#include <list>
-#include <stdexcept>
-#include "macros.h"
-#include "pdu.h"
-#include "endianness.h"
-#include "small_uint.h"
-#include "pdu_option.h"
-#include "ipv6_address.h"
+#include <tins/macros.h>
+#include <tins/cxxstd.h>
+#include <tins/pdu.h>
+#include <tins/endianness.h>
+#include <tins/small_uint.h>
+#include <tins/pdu_option.h>
+#include <tins/ipv6_address.h>
 
 namespace Tins {
+namespace Memory {
+
+class OutputMemoryStream;
+
+} // Memory
+
 class PacketSender;
     
 /**
  * \class IPv6
  * Represents an IPv6 PDU.
  */
-class IPv6 : public PDU {
+class TINS_API IPv6 : public PDU {
 public:
     /**
      * This PDU's flag.
@@ -66,7 +71,7 @@ public:
     /**
      * The type used to store the extension headers.
      */
-    typedef std::list<ext_header> headers_type;
+    typedef std::vector<ext_header> headers_type;
 
     /**
      * The values used to identify extension headers.
@@ -84,6 +89,23 @@ public:
     };
 
     /**
+     * The values used to identify Hop-By-Hop Options and Destination Options.
+     */
+    enum OptionType {
+        PAD_1 = 0,
+        PAD_N = 1,
+        JUMBO_PAYLOAD = 0xC2,
+    };
+
+    /**
+     * \brief Extracts metadata for this protocol based on the buffer provided
+     *
+     * \param buffer Pointer to a buffer
+     * \param total_sz Size of the buffer pointed by buffer
+     */
+    static metadata extract_metadata(const uint8_t *buffer, uint32_t total_sz);
+
+    /**
      * \brief Constructs an IPv6 object.
      * 
      * \param ip_dst The destination ip address(optional).
@@ -92,8 +114,8 @@ public:
      * for the packet being constructed(optional).
      */
     IPv6(address_type ip_dst = address_type(), 
-        address_type ip_src = address_type(), 
-        PDU *child = 0);
+         address_type ip_src = address_type(), 
+         PDU* child = 0);
 
     /**
      * \brief Constructs an IPv6 object from a buffer and adds all 
@@ -105,7 +127,7 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    IPv6(const uint8_t *buffer, uint32_t total_sz);
+    IPv6(const uint8_t* buffer, uint32_t total_sz);
 
     // Getters
 
@@ -114,7 +136,7 @@ public:
      *  \return The stored version field value.
      */
     small_uint<4> version() const {
-        return _header.version;
+        return header_.version;
     }
 
     /**
@@ -123,10 +145,10 @@ public:
      */
     uint8_t traffic_class() const {
         #if TINS_IS_LITTLE_ENDIAN
-        return ((_header.traffic_class << 4) & 0xf0) | 
-                ((_header.flow_label[0] >> 4) & 0x0f);
+        return ((header_.traffic_class << 4) & 0xf0) | 
+                ((header_.flow_label[0] >> 4) & 0x0f);
         #else
-        return _header.traffic_class;
+        return header_.traffic_class;
         #endif
     }
 
@@ -136,11 +158,11 @@ public:
      */
     small_uint<20> flow_label() const {
         #if TINS_IS_LITTLE_ENDIAN
-        return ((_header.flow_label[0] & 0x0f) << 16)
-                | (_header.flow_label[1] << 8)
-                | (_header.flow_label[2]);
+        return ((header_.flow_label[0] & 0x0f) << 16)
+                | (header_.flow_label[1] << 8)
+                | (header_.flow_label[2]);
         #else
-        return _header.flow_label;
+        return header_.flow_label;
         #endif
     }
 
@@ -149,7 +171,7 @@ public:
      *  \return The stored payload_length field value.
      */
     uint16_t payload_length() const {
-        return Endian::be_to_host(_header.payload_length);
+        return Endian::be_to_host(header_.payload_length);
     }
 
     /**
@@ -157,7 +179,7 @@ public:
      *  \return The stored next_header field value.
      */
     uint8_t next_header() const {
-        return _header.next_header;
+        return header_.next_header;
     }
 
     /**
@@ -165,7 +187,7 @@ public:
      *  \return The stored hop_limit field value.
      */
     uint8_t hop_limit() const {
-        return _header.hop_limit;
+        return header_.hop_limit;
     }
 
     /**
@@ -173,7 +195,7 @@ public:
      *  \return The stored src_addr field value.
      */
     address_type src_addr() const {
-        return _header.src_addr;
+        return header_.src_addr;
     }
 
     /**
@@ -181,7 +203,7 @@ public:
      *  \return The stored dst_addr field value.
      */
     address_type dst_addr() const {
-        return _header.dst_addr;
+        return header_.dst_addr;
     }
 
     /**
@@ -189,7 +211,7 @@ public:
      *  \return The stored headers.
      */
     const headers_type& headers() const {
-        return ext_headers;
+        return ext_headers_;
     }
 
     // Setters
@@ -234,34 +256,34 @@ public:
      * \brief Setter for the src_addr field.
      * \param new_src_addr The new src_addr field value.
      */
-    void src_addr(const address_type &new_src_addr);
+    void src_addr(const address_type& new_src_addr);
 
     /**
      * \brief Setter for the dst_addr field.
      * \param new_dst_addr The new dst_addr field value.
      */
-    void dst_addr(const address_type &new_dst_addr);
+    void dst_addr(const address_type& new_dst_addr);
     
     /**
      * \brief Returns the header size.
      *
-     * This metod overrides PDU::header_size. \sa PDU::header_size
+     * This method overrides PDU::header_size. \sa PDU::header_size
      */
     uint32_t header_size() const;
     
     /** 
-     * \brief Check wether ptr points to a valid response for this PDU.
+     * \brief Check whether ptr points to a valid response for this PDU.
      *
      * \sa PDU::matches_response
      * \param ptr The pointer to the buffer.
      * \param total_sz The size of the buffer.
      */
-    bool matches_response(const uint8_t *ptr, uint32_t total_sz) const;
+    bool matches_response(const uint8_t* ptr, uint32_t total_sz) const;
     
     /**
      * \sa PDU::clone
      */
-    IPv6 *clone() const {
+    IPv6* clone() const {
         return new IPv6(*this);
     }
     
@@ -275,16 +297,56 @@ public:
     /**
      * \sa PDU::send()
      */
-    void send(PacketSender &sender, const NetworkInterface &);
+    void send(PacketSender& sender, const NetworkInterface &);
+
+    /**
+     * \brief Receives a matching response for this packet.
+     *
+     * \sa PDU::recv_response
+     * \param sender The packet sender which will receive the packet.
+     */
+    PDU* recv_response(PacketSender& sender, const NetworkInterface &);
     #endif
     
     /**
      * Adds an extension header.
      * 
+     * \deprecated Use IPv6::add_header
      * \param header The extension header to be added.
      */
-    void add_ext_header(const ext_header &header);
+    TINS_DEPRECATED(void add_ext_header(const ext_header& header));
     
+    /**
+     * Adds an extension header
+     * 
+     * \deprecated Use IPv6::add_header
+     * \param header The extension header to be added.
+     */
+    void add_header(const ext_header& header);
+
+    #if TINS_IS_CXX11
+
+    /**
+     * Adds an extension header by moving it
+     * 
+     * \param header The extension header to be added.
+     */
+    void add_header(ext_header&& header) {
+        ext_headers_.emplace_back(std::move(header));
+    }
+
+    /**
+     * Adds an extension header by using the provided parameters
+     * 
+     * \param header The extension header to be added.
+     */
+    template <typename... Args>
+    void add_header(Args&&... args) {
+        ext_headers_.emplace_back(std::forward<Args>(args)...);
+    }
+
+    #endif // TINS_IS_CXX11
+
     /**
      * \brief Searchs for an extension header that matchs the given 
      * flag.
@@ -295,12 +357,14 @@ public:
      * 
      * \param id The header identifier to be searched.
      */
-    const ext_header *search_header(ExtensionHeader id) const;
+    const ext_header* search_header(ExtensionHeader id) const;
 private:
-    void write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *parent);
+    void write_serialization(uint8_t* buffer, uint32_t total_sz);
     void set_last_next_header(uint8_t value);
-    static uint8_t *write_header(const ext_header &header, uint8_t *buffer);
+    uint32_t calculate_headers_size() const;
+    static void write_header(const ext_header& header, Memory::OutputMemoryStream& stream);
     static bool is_extension_header(uint8_t header_id);
+    static uint32_t get_padding_size(const ext_header& header);
 
     TINS_BEGIN_PACK
     struct ipv6_header {
@@ -322,9 +386,9 @@ private:
         uint8_t src_addr[16], dst_addr[16];
     } TINS_END_PACK;
 
-    ipv6_header _header;
-    headers_type ext_headers;
-    uint32_t headers_size;
+    ipv6_header header_;
+    headers_type ext_headers_;
+    uint8_t next_header_;
 };
 }
 

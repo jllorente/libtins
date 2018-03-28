@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,11 +30,15 @@
 #ifndef TINS_PPI_H
 #define TINS_PPI_H
 
-#include "pdu.h"
-#include "endianness.h"
-#include "small_uint.h"
+#include <tins/pdu.h>
+#include <tins/macros.h>
+#include <tins/endianness.h>
+#include <tins/small_uint.h>
+
+#ifdef TINS_HAVE_PCAP
 
 namespace Tins {
+
 /**
  * \class PPI
  * \brief Represents a Per-Packet Information PDU.
@@ -43,7 +47,7 @@ namespace Tins {
  * cannot be serialized. Therefore, it is only useful while
  * sniffing packets.
  */
-class PPI : public PDU {
+class TINS_API PPI : public PDU {
 public:
     /**
      * This PDU's flag.
@@ -61,7 +65,7 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    PPI(const uint8_t *buffer, uint32_t total_sz);
+    PPI(const uint8_t* buffer, uint32_t total_sz);
 
     // Getters
 
@@ -70,7 +74,7 @@ public:
      *  \return The stored version field value.
      */
     uint8_t version() const {
-        return _header.version;
+        return header_.version;
     }
 
     /**
@@ -78,7 +82,7 @@ public:
      *  \return The stored flags field value.
      */
     uint8_t flags() const {
-        return _header.flags;
+        return header_.flags;
     }
 
     /**
@@ -86,7 +90,7 @@ public:
      *  \return The stored length field value.
      */
     uint16_t length() const {
-        return Endian::le_to_host(_header.length);
+        return Endian::le_to_host(header_.length);
     }
 
     /**
@@ -94,13 +98,13 @@ public:
      *  \return The stored Data Link Type field value.
      */
     uint32_t dlt() const {
-        return Endian::le_to_host(_header.dlt);
+        return Endian::le_to_host(header_.dlt);
     }
 
     /**
      * \brief Returns the header size.
      *
-     * This metod overrides PDU::header_size. \sa PDU::header_size
+     * This method overrides PDU::header_size. \sa PDU::header_size
      */
     uint32_t header_size() const;
 
@@ -108,29 +112,34 @@ public:
      * \brief Getter for the PDU's type.
      * \sa PDU::pdu_type
      */
-    PDUType pdu_type() const { return pdu_flag; }
+    PDUType pdu_type() const {
+        return pdu_flag;
+    }
 
     /**
      * \brief Clones this PDU.
      *
      * \sa PDU::clone
      */
-    PPI *clone() const {
+    PPI* clone() const {
         return new PPI(*this);
     }
 private:
-    void write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *);
+    void write_serialization(uint8_t* buffer, uint32_t total_sz);
     void parse_80211(const uint8_t* buffer, uint32_t total_sz);
 
-    struct header {
+    struct ppi_header {
         uint8_t version, flags;
         uint16_t length;
         uint32_t dlt;
     };
 
-    header _header;
-    byte_array _data;
+    ppi_header header_;
+    byte_array data_;
 };
-}
+
+} // Tins
+
+#endif // TINS_HAVE_PCAP
 
 #endif // TINS_PPI_H

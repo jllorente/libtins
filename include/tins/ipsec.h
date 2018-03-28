@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,16 +30,18 @@
 #ifndef TINS_IPSEC_H
 #define TINS_IPSEC_H
 
-#include "pdu.h"
-#include "endianness.h"
-#include "small_uint.h"
+#include <tins/pdu.h>
+#include <tins/macros.h>
+#include <tins/endianness.h>
+#include <tins/small_uint.h>
 
 namespace Tins {
+
 /**
  * \class IPSecAH
  * \brief Represents an IPSec Authentication Header.
  */
-class IPSecAH : public PDU {
+class TINS_API IPSecAH : public PDU {
 public:
     /**
      * This PDU's flag.
@@ -65,7 +67,7 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    IPSecAH(const uint8_t *buffer, uint32_t total_sz);
+    IPSecAH(const uint8_t* buffer, uint32_t total_sz);
 
     // Getters
 
@@ -74,7 +76,7 @@ public:
      *  \return The stored Next header field value.
      */
     uint8_t next_header() const {
-        return _header.next_header;
+        return header_.next_header;
     }
 
     /**
@@ -82,7 +84,7 @@ public:
      *  \return The stored Length field value.
      */
     uint8_t length() const {
-        return _header.length;
+        return header_.length;
     }
 
     /**
@@ -90,7 +92,7 @@ public:
      *  \return The stored Security Parameters Index field value.
      */
     uint32_t spi() const {
-        return Endian::be_to_host(_header.spi);
+        return Endian::be_to_host(header_.spi);
     }
 
     /**
@@ -98,15 +100,15 @@ public:
      *  \return The stored Sequence number field value.
      */
     uint32_t seq_number() const {
-        return Endian::be_to_host(_header.seq_number);
+        return Endian::be_to_host(header_.seq_number);
     }
     
     /**
      *  \brief Getter for the ICV field.
      *  \return The stored ICV field value.
      */
-    const byte_array &icv() const {
-        return _icv;
+    const byte_array& icv() const {
+        return icv_;
     }
 
     // Setters
@@ -137,14 +139,14 @@ public:
     
     /**
      *  \brief Setter for the ICV field.
-     *  \param new_icv The new ICV field value.
+     *  \param newicv_ The new ICV field value.
      */
-    void icv(const byte_array &new_icv);
+    void icv(const byte_array& newicv_);
 
     /**
      * \brief Returns the header size.
      *
-     * This metod overrides PDU::header_size. \sa PDU::header_size
+     * This method overrides PDU::header_size. \sa PDU::header_size
      */
     uint32_t header_size() const;
 
@@ -157,25 +159,25 @@ public:
     /**
      * \sa PDU::clone
      */
-    IPSecAH *clone() const {
+    IPSecAH* clone() const {
         return new IPSecAH(*this);
     }
 private:
-    struct header {
+    struct ipsec_header {
         uint8_t next_header, length;
         uint32_t spi, seq_number;
     };
 
-    void write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *);
+    void write_serialization(uint8_t* buffer, uint32_t total_sz);
     
-    header _header;
-    byte_array _icv;
+    ipsec_header header_;
+    byte_array icv_;
 };
 
 /**
  * \brief Represents an IPSec Authentication Header.
  */
-class IPSecESP : public PDU {
+class TINS_API IPSecESP : public PDU {
 public:
     /**
      * This PDU's flag.
@@ -198,7 +200,7 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    IPSecESP(const uint8_t *buffer, uint32_t total_sz);
+    IPSecESP(const uint8_t* buffer, uint32_t total_sz);
 
     // Getters
     
@@ -207,7 +209,7 @@ public:
      *  \return The stored Security Parameters Index field value.
      */
     uint32_t spi() const {
-        return Endian::be_to_host(_header.spi);
+        return Endian::be_to_host(header_.spi);
     }
 
     /**
@@ -215,7 +217,7 @@ public:
      *  \return The stored Sequence number field value.
      */
     uint32_t seq_number() const {
-        return Endian::be_to_host(_header.seq_number);
+        return Endian::be_to_host(header_.seq_number);
     }
 
     // Setters
@@ -235,7 +237,7 @@ public:
     /**
      * \brief Returns the header size.
      *
-     * This metod overrides PDU::header_size. \sa PDU::header_size
+     * This method overrides PDU::header_size. \sa PDU::header_size
      */
     uint32_t header_size() const;
 
@@ -248,17 +250,17 @@ public:
     /**
      * \sa PDU::clone
      */
-    IPSecESP *clone() const {
+    IPSecESP* clone() const {
         return new IPSecESP(*this);
     }
 private:
-    struct header {
+    struct ipsec_header {
         uint32_t spi, seq_number;
     };
 
-    void write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *);
+    void write_serialization(uint8_t* buffer, uint32_t total_sz);
     
-    header _header;
+    ipsec_header header_;
 };
 }
 

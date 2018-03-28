@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,125 +27,105 @@
  *
  */
 
-#ifdef TINS_DEBUG
-    #include <cassert>
-#endif
 #include <cstring>
-#include "pppoe.h"
-#include "rawpdu.h"
-#include "exceptions.h"
+#include <tins/pppoe.h>
+#include <tins/rawpdu.h>
+#include <tins/exceptions.h>
+#include <tins/memory_helpers.h>
+
+using std::string;
+using std::vector;
+using std::memcpy;
+using std::copy;
+
+using Tins::Memory::InputMemoryStream;
+using Tins::Memory::OutputMemoryStream;
 
 namespace Tins {
 
 PPPoE::PPPoE() 
-: _header(), _tags_size()
-{
+: header_(), tags_size_() {
     version(1);
     type(1);
 }
 
-PPPoE::PPPoE(const uint8_t *buffer, uint32_t total_sz) 
-: _tags_size()
-{
-    if(total_sz < sizeof(_header))
-        throw malformed_packet();
-    std::memcpy(&_header, buffer, sizeof(_header));
-    buffer += sizeof(_header);
-    total_sz -= sizeof(_header);
-    total_sz = std::min(total_sz, (uint32_t)payload_length());
+PPPoE::PPPoE(const uint8_t* buffer, uint32_t total_sz) 
+: tags_size_() {
+    InputMemoryStream stream(buffer, total_sz);
+    stream.read(header_); 
+    const uint32_t read_size = stream.size() < payload_length() ? stream.size()
+                                                                : payload_length();
+    stream.size(read_size);
     // If this is a session data packet
-    if(code() == 0) {
-        if(total_sz > 0) {
+    if (code() == 0) {
+        if (stream) {
             inner_pdu(
-                new RawPDU(buffer, total_sz)
+                new RawPDU(stream.pointer(), stream.size())
             );
         }
     }
     else {
-        const uint8_t *end = buffer + total_sz;
-        while(buffer < end) {
-            if(buffer + sizeof(uint32_t) * 2 > end)
+        while (stream) {
+            TagTypes opt_type = static_cast<TagTypes>(stream.read<uint16_t>());
+            uint16_t opt_len = stream.read_be<uint16_t>();
+            if (!stream.can_read(opt_len)) {
                 throw malformed_packet();
-            uint16_t opt_type;
-            std::memcpy(&opt_type, buffer, sizeof(uint16_t));
-            uint16_t opt_len;
-            std::memcpy(&opt_len, buffer + sizeof(uint16_t), sizeof(uint16_t));
-            buffer += sizeof(uint16_t) * 2;
-            total_sz -= sizeof(uint16_t) * 2;
-            if(Endian::be_to_host(opt_len) > total_sz)
-                throw malformed_packet();
-            add_tag(
-                tag(
-                    static_cast<TagTypes>(opt_type), 
-                    Endian::be_to_host(opt_len), 
-                    buffer
-                )
-            );
-            buffer += Endian::be_to_host(opt_len);
-            total_sz -= Endian::be_to_host(opt_len);
+            }
+            add_tag(tag(opt_type, opt_len, stream.pointer()));
+            stream.skip(opt_len);
         }
     }
 }
 
-const PPPoE::tag *PPPoE::search_tag(TagTypes identifier) const {
-    for(tags_type::const_iterator it = _tags.begin(); it != _tags.end(); ++it) {
-        if(it->option() == identifier)
+const PPPoE::tag* PPPoE::search_tag(TagTypes identifier) const {
+    for (tags_type::const_iterator it = tags_.begin(); it != tags_.end(); ++it) {
+        if (it->option() == identifier) {
             return &*it;
+        }
     }
     return 0;
 }
 
 void PPPoE::version(small_uint<4> new_version) {
-    _header.version = new_version;
+    header_.version = new_version;
 }
 
 void PPPoE::type(small_uint<4> new_type) {
-    _header.type = new_type;
+    header_.type = new_type;
 }
 
 void PPPoE::code(uint8_t new_code) {
-    _header.code = new_code;
+    header_.code = new_code;
 }
 
 void PPPoE::session_id(uint16_t new_session_id) {
-    _header.session_id = Endian::host_to_be(new_session_id);
+    header_.session_id = Endian::host_to_be(new_session_id);
 }
 
 void PPPoE::payload_length(uint16_t new_payload_length) {
-    _header.payload_length = Endian::host_to_be(new_payload_length);
+    header_.payload_length = Endian::host_to_be(new_payload_length);
 }
 
 uint32_t PPPoE::header_size() const {
-    return sizeof(_header) + _tags_size;
+    return sizeof(header_) + tags_size_;
 }
 
-void PPPoE::write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *) 
-{
-    #ifdef TINS_DEBUG
-        assert(total_sz == sizeof(_header) + _tags_size);
-    #endif
-    std::memcpy(buffer, &_header, sizeof(_header));
-    if(_tags_size > 0)
-        ((pppoe_hdr*)buffer)->payload_length = Endian::host_to_be(_tags_size);
-    buffer += sizeof(_header);
-    uint16_t uint16_t_buffer;
-    for(tags_type::const_iterator it = _tags.begin(); it != _tags.end(); ++it) {
-        uint16_t_buffer = it->option();
-        std::memcpy(buffer, &uint16_t_buffer, sizeof(uint16_t));
-        uint16_t_buffer = Endian::host_to_be(static_cast<uint16_t>(it->length_field()));
-        std::memcpy(buffer + sizeof(uint16_t), &uint16_t_buffer, sizeof(uint16_t));
-        std::copy(
-            it->data_ptr(), 
-            it->data_ptr() + it->data_size(),
-            buffer + sizeof(uint16_t) * 2
-        );
-        buffer += sizeof(uint16_t) * 2 + it->data_size();
+void PPPoE::write_serialization(uint8_t* buffer, uint32_t total_sz) {
+    OutputMemoryStream stream(buffer, total_sz);
+    if (tags_size_ > 0) {
+        payload_length(tags_size_);
+    }
+    stream.write(header_);
+    for (tags_type::const_iterator it = tags_.begin(); it != tags_.end(); ++it) {
+        stream.write<uint16_t>(it->option());
+        stream.write(Endian::host_to_be<uint16_t>(it->length_field()));
+        stream.write(it->data_ptr(), it->data_size());
     }
 }
 
-void PPPoE::add_tag(const tag &option) {
-    _tags_size += static_cast<uint16_t>(option.data_size() + sizeof(uint16_t) * 2);
-    _tags.push_back(option);
+void PPPoE::add_tag(const tag& option) {
+    tags_size_ += static_cast<uint16_t>(option.data_size() + sizeof(uint16_t) * 2);
+    tags_.push_back(option);
 }
 
 // *********************** Setters *************************
@@ -156,27 +136,27 @@ void PPPoE::end_of_list() {
     );
 }
 
-void PPPoE::service_name(const std::string &value) {
+void PPPoE::service_name(const string& value) {
     add_tag_iterable(SERVICE_NAME, value);
 }
 
-void PPPoE::ac_name(const std::string &value) {
+void PPPoE::ac_name(const string& value) {
     add_tag_iterable(AC_NAME, value);
 }
 
-void PPPoE::host_uniq(const byte_array &value) {
+void PPPoE::host_uniq(const byte_array& value) {
     add_tag_iterable(HOST_UNIQ, value);
 }
 
-void PPPoE::ac_cookie(const byte_array &value) {
+void PPPoE::ac_cookie(const byte_array& value) {
     add_tag_iterable(AC_COOKIE, value);
 }
 
-void PPPoE::vendor_specific(const vendor_spec_type &value) {
-    std::vector<uint8_t> buffer(sizeof(uint32_t) + value.data.size());
+void PPPoE::vendor_specific(const vendor_spec_type& value) {
+    vector<uint8_t> buffer(sizeof(uint32_t) + value.data.size());
     uint32_t tmp_vendor_id = Endian::host_to_be(value.vendor_id);
-    std::memcpy(&buffer[0], &tmp_vendor_id, sizeof(uint32_t));
-    std::copy(
+    memcpy(&buffer[0], &tmp_vendor_id, sizeof(uint32_t));
+    copy(
         value.data.begin(), 
         value.data.end(), 
         buffer.begin() + sizeof(uint32_t)
@@ -190,29 +170,29 @@ void PPPoE::vendor_specific(const vendor_spec_type &value) {
     );
 }
 
-void PPPoE::relay_session_id(const byte_array &value) {
+void PPPoE::relay_session_id(const byte_array& value) {
     add_tag_iterable(RELAY_SESSION_ID, value);
 }
 
-void PPPoE::service_name_error(const std::string &value) {
+void PPPoE::service_name_error(const std::string& value) {
     add_tag_iterable(SERVICE_NAME_ERROR, value);
 }
 
-void PPPoE::ac_system_error(const std::string &value) {
+void PPPoE::ac_system_error(const std::string& value) {
     add_tag_iterable(AC_SYSTEM_ERROR, value);
 }
 
-void PPPoE::generic_error(const std::string &value) {
+void PPPoE::generic_error(const std::string& value) {
     add_tag_iterable(GENERIC_ERROR, value);
 }
 
 // *********************** Getters *************************
 
-std::string PPPoE::service_name() const {
+string PPPoE::service_name() const {
     return search_and_convert<std::string>(SERVICE_NAME);
 }
 
-std::string PPPoE::ac_name() const {
+string PPPoE::ac_name() const {
     return search_and_convert<std::string>(AC_NAME);
 }
 
@@ -225,9 +205,10 @@ byte_array PPPoE::ac_cookie() const {
 }
 
 PPPoE::vendor_spec_type PPPoE::vendor_specific() const {
-    const tag *t = search_tag(VENDOR_SPECIFIC);
-    if(!t)
+    const tag* t = search_tag(VENDOR_SPECIFIC);
+    if (!t) {
         throw option_not_found();
+    }
     return t->to<vendor_spec_type>();
 }
 
@@ -235,29 +216,27 @@ byte_array PPPoE::relay_session_id() const {
     return search_and_convert<byte_array>(RELAY_SESSION_ID);
 }
 
-std::string PPPoE::service_name_error() const {
-    return search_and_convert<std::string>(SERVICE_NAME_ERROR);
+string PPPoE::service_name_error() const {
+    return search_and_convert<string>(SERVICE_NAME_ERROR);
 }
 
-std::string PPPoE::ac_system_error() const {
-    return search_and_convert<std::string>(AC_SYSTEM_ERROR);
+string PPPoE::ac_system_error() const {
+    return search_and_convert<string>(AC_SYSTEM_ERROR);
 }
 
-std::string PPPoE::generic_error() const {
-    return search_and_convert<std::string>(GENERIC_ERROR);
+string PPPoE::generic_error() const {
+    return search_and_convert<string>(GENERIC_ERROR);
 }
 
-PPPoE::vendor_spec_type PPPoE::vendor_spec_type::from_option(const tag &opt) {
-    if(opt.data_size() < sizeof(uint32_t))
+PPPoE::vendor_spec_type PPPoE::vendor_spec_type::from_option(const tag& opt) {
+    if (opt.data_size() < sizeof(uint32_t)) {
         throw malformed_option();
+    }
     vendor_spec_type output;
-    std::memcpy(&output.vendor_id, opt.data_ptr(), sizeof(uint32_t));
-    output.vendor_id = Endian::be_to_host(output.vendor_id);
-    output.data.assign(
-        opt.data_ptr() + sizeof(uint32_t), 
-        opt.data_ptr() + opt.data_size()
-    );
+    InputMemoryStream stream(opt.data_ptr(), opt.data_size());
+    output.vendor_id = stream.read_be<uint32_t>();
+    stream.read(output.data, stream.size());
     return output;
 }
-} //namespace Tins
 
+} //namespace Tins

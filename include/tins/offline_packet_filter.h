@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,9 +32,14 @@
 
 #include <string>
 #include <stdint.h>
-#include "data_link_type.h"
+#include <tins/macros.h>
+
+#ifdef TINS_HAVE_PCAP
+
+#include <tins/data_link_type.h>
 
 namespace Tins {
+
 class PDU;
 
 /**
@@ -74,7 +79,7 @@ class PDU;
  * }
  * \endcode
  */
-class OfflinePacketFilter {
+class TINS_API OfflinePacketFilter {
 public:
     /**
      * Constructs an OfflinePacketFilter object.
@@ -84,10 +89,10 @@ public:
      * \param snap_len The snapshot length to use.
      */
     template<typename T>
-    OfflinePacketFilter(const std::string& filter, const DataLinkType<T>& lt,
-        unsigned int snap_len = 65535)
-    : string_filter(filter)
-    {
+    OfflinePacketFilter(const std::string& filter, 
+                        const DataLinkType<T>& lt,
+                        unsigned int snap_len = 65535)
+    : string_filter_(filter) {
         init(filter, lt.get_type(), snap_len);
     }
 
@@ -148,10 +153,13 @@ private:
         unsigned int snap_len);
 
 
-    pcap_t* handle;
-    mutable bpf_program filter;
-    std::string string_filter;
+    pcap_t* handle_;
+    mutable bpf_program filter_;
+    std::string string_filter_;
 };
+
 } // Tins
+
+#endif // TINS_HAVE_PCAP
 
 #endif // TINS_OFFLINE_PACKET_FILTER_H

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,6 +34,7 @@
 #include <stdexcept>
 
 namespace Tins {
+
 /**
  * \brief Base class for all libtins exceptions.
  */
@@ -44,17 +45,17 @@ public:
 
     exception_base(const std::string& message) 
     : std::runtime_error(message) { }
+
+    exception_base(const char* message) 
+    : std::runtime_error(message) { }
 };
 
 /**
  * \brief Exception thrown when an option is not found.
  */
-class option_not_found : exception_base {
+class option_not_found : public exception_base {
 public:
-    // try to avoid allocations by doing this.
-    const char* what() const throw() {
-        return "Option not found";
-    }
+    option_not_found() : exception_base("Option not found") { }
 };
 
 /**
@@ -62,9 +63,15 @@ public:
  */
 class malformed_packet : public exception_base {
 public:
-    const char* what() const throw() {
-        return "Malformed packet";
-    }
+    malformed_packet() : exception_base("Malformed packet") { }
+};
+
+/**
+ * \brief Exception thrown when serializing a packet fails.
+ */
+class serialization_error : public exception_base {
+public:
+    serialization_error() : exception_base("Serialization error") { }
 };
 
 /**
@@ -72,9 +79,7 @@ public:
  */
 class pdu_not_found : public exception_base {
 public:
-    const char* what() const throw() {
-        return "PDU not found";
-    }
+    pdu_not_found() : exception_base("PDU not found") { }
 };
 
 /**
@@ -83,9 +88,24 @@ public:
  */
 class invalid_interface : public exception_base {
 public:
-    const char* what() const throw() {
-        return "Invalid interface";
-    }
+    invalid_interface() : exception_base("Invalid interface") { }
+};
+
+/**
+ * \brief Exception thrown when an invalid string representation of an address
+ * is provided
+ */
+class invalid_address : public exception_base {
+public:
+    invalid_address() : exception_base("Invalid address") { }
+};
+
+/**
+ * \brief Exception thrown when a PDU option is set using an incorrect value
+ */
+class invalid_option_value : public exception_base {
+public:
+    invalid_option_value() : exception_base("Invalid option value") { }
 };
 
 /**
@@ -93,9 +113,7 @@ public:
  */
 class field_not_present : public exception_base {
 public:
-    const char* what() const throw() {
-        return "Field not present";
-    }
+    field_not_present() : exception_base("Field not present") { }
 };
 
 /**
@@ -103,7 +121,7 @@ public:
  */
 class socket_open_error : public exception_base {
 public:
-    socket_open_error(const std::string &msg)
+    socket_open_error(const std::string& msg)
     : exception_base(msg) { }
 };
 
@@ -112,7 +130,7 @@ public:
  */
 class socket_close_error : exception_base {
 public:
-    socket_close_error(const std::string &msg)
+    socket_close_error(const std::string& msg)
     : exception_base(msg) { }
 };
 
@@ -121,7 +139,7 @@ public:
  */
 class socket_write_error : public exception_base {
 public:
-    socket_write_error(const std::string &msg)
+    socket_write_error(const std::string& msg)
     : exception_base(msg) { }
 };
 
@@ -131,9 +149,7 @@ public:
  */
 class invalid_socket_type : public exception_base {
 public:
-    const char *what() const throw() {
-        return "The provided socket type is invalid";
-    }
+    invalid_socket_type() : exception_base("The provided socket type is invalid") { }
 };
 
 /**
@@ -142,9 +158,7 @@ public:
  */
 class unknown_link_type : public exception_base {
 public:
-    const char *what() const throw() {
-        return "The sniffed link layer PDU type is unknown";
-    }
+    unknown_link_type() : exception_base("The sniffed link layer PDU type is unknown") { }
 };
 
 /**
@@ -152,9 +166,7 @@ public:
  */
 class malformed_option : public exception_base {
 public:
-    const char *what() const throw() {
-        return "Malformed option";
-    }
+    malformed_option() : exception_base("Malformed option") { }
 };
 
 /**
@@ -162,9 +174,7 @@ public:
  */
 class bad_tins_cast : public exception_base {
 public:
-    const char *what() const throw() {
-        return "Bad Tins cast";
-    }
+    bad_tins_cast() : exception_base("Bad Tins cast") { }
 };
 
 /**
@@ -173,9 +183,16 @@ public:
  */
 class protocol_disabled : public exception_base {
 public:
-    const char *what() const throw() {
-        return "Protocol disabled";
-    }
+    protocol_disabled() : exception_base("Protocol disabled") { }
+};
+
+/**
+ * \brief Exception thrown when a feature has been disabled
+ * at compile time.
+ */
+class feature_disabled : public exception_base {
+public:
+    feature_disabled() : exception_base("Feature disabled") { }
 };
 
 /**
@@ -184,9 +201,89 @@ public:
  */
 class option_payload_too_large : public exception_base {
 public:
-    const char *what() const throw() {
-        return "Option payload too large";
+    option_payload_too_large() : exception_base("Option payload too large") { }
+};
+
+/**
+ * \brief Generic pcap error
+ */
+class pcap_error : public exception_base {
+public:
+    pcap_error(const char* message) : exception_base(message) {
+
     }
+
+    pcap_error(const std::string& message) : exception_base(message) {
+
+    }
+};
+
+/**
+ * \brief Exception thrown when an invalid pcap filter is compiled
+ */
+class invalid_pcap_filter : public exception_base {
+public:
+    invalid_pcap_filter(const char* message) : exception_base(message) {
+
+    }
+};
+
+/**
+ * \brief Exception thrown when serialiation of a non-serializable PDU
+ * is attempted
+ */
+class pdu_not_serializable : public exception_base {
+public:
+    pdu_not_serializable() : exception_base("PDU not serializable") { }
+};
+
+/**
+ * \brief Exception thrown when opening a pcap handle fails
+ */
+class pcap_open_failed : public exception_base {
+public:
+    pcap_open_failed() : exception_base("Failed to create pcap handle") { }
+};
+
+/**
+ * \brief Exception thrown when a function not supported on the current OS
+ * is called
+ */
+class unsupported_function : public exception_base {
+public:
+    unsupported_function() : exception_base("Function is not supported on this OS") { }
+};
+
+/**
+ * \brief Exception thrown when an invalid domain name is parsed
+ */
+class invalid_domain_name : public exception_base {
+public:
+    invalid_domain_name() : exception_base("Invalid domain name") { }
+};
+
+/**
+ * \brief Exception thrown when a stream is not found
+ */
+class stream_not_found : public exception_base {
+public:
+    stream_not_found() : exception_base("Stream not found") { }
+};
+
+/**
+ * \brief Exception thrown when a required callback for an object is not set
+ */
+class callback_not_set : public exception_base {
+public:
+    callback_not_set() : exception_base("Callback not set") { }
+};
+
+/**
+ * \brief Exception thrown when an invalid packet is provided to some function
+ */
+class invalid_packet : public exception_base {
+public:
+    invalid_packet() : exception_base("Invalid packet") { }
 };
 
 namespace Crypto {
@@ -196,9 +293,7 @@ namespace WPA2 {
      */
     class invalid_handshake : public exception_base {
     public:
-        const char *what() const throw() {
-            return "Invalid WPA2 handshake";
-        }
+        invalid_handshake() : exception_base("Invalid WPA2 handshake") { }
     };
 } // WPA2
 } // Crypto

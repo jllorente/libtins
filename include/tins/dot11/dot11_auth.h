@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,18 +27,19 @@
  *
  */
 
-#include "../config.h"
+#include <tins/config.h>
 
-#if !defined(TINS_DOT11_DOT11_AUTH_H) && defined(HAVE_DOT11)
+#if !defined(TINS_DOT11_DOT11_AUTH_H) && defined(TINS_HAVE_DOT11)
 #define TINS_DOT11_DOT11_AUTH_H
 
-#include "../dot11/dot11_mgmt.h"
+#include <tins/dot11/dot11_mgmt.h>
+#include <tins/macros.h>
 
 namespace Tins {
 /**
  * \brief IEEE 802.11 Authentication Request frame.
  */
-class Dot11Authentication : public Dot11ManagementFrame {
+class TINS_API Dot11Authentication : public Dot11ManagementFrame {
 public:
     /**
      * \brief This PDU's flag.
@@ -54,8 +55,8 @@ public:
      * \param dst_hw_addr The destination hardware address.
      * \param src_hw_addr The source hardware address.
      */
-    Dot11Authentication(const address_type &dst_hw_addr = address_type(), 
-                        const address_type &src_hw_addr = address_type());
+    Dot11Authentication(const address_type& dst_hw_addr = address_type(), 
+                        const address_type& src_hw_addr = address_type());
 
     /**
      * \brief Constructs a Dot11Authentication object from a buffer 
@@ -71,28 +72,33 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    Dot11Authentication(const uint8_t *buffer, uint32_t total_sz);
+    Dot11Authentication(const uint8_t* buffer, uint32_t total_sz);
 
     /**
      * \brief Getter for the Authetication Algorithm Number field.
      *
      * \return The stored authentication algorithm number.
      */
-    uint16_t auth_algorithm() const {return Endian::le_to_host(_body.auth_algorithm); }
+    uint16_t auth_algorithm() const {
+        return Endian::le_to_host(body_.auth_algorithm); }
 
     /**
      * \brief Getter for the Authetication Sequence Number field.
      *
      * \return The stored authentication sequence number.
      */
-    uint16_t auth_seq_number() const {return Endian::le_to_host(_body.auth_seq_number); }
+    uint16_t auth_seq_number() const {
+        return Endian::le_to_host(body_.auth_seq_number);
+    }
 
     /**
      * \brief Getter for the status code field.
      *
      * \return The stored status code.
      */
-    uint16_t status_code() const { return Endian::le_to_host(_body.status_code); }
+    uint16_t status_code() const {
+        return Endian::le_to_host(body_.status_code);
+    }
 
     /**
      * \brief Setter for the Authetication Algorithm Number field.
@@ -129,10 +135,12 @@ public:
      * \brief Getter for the PDU's type.
      * \sa PDU::pdu_type
      */
-    PDUType pdu_type() const { return pdu_flag; }
+    PDUType pdu_type() const {
+        return pdu_flag;
+    }
 
     /**
-     * \brief Check wether this PDU matches the specified flag.
+     * \brief Check whether this PDU matches the specified flag.
      * \param flag The flag to match
      * \sa PDU::matches_flag
      */
@@ -145,27 +153,26 @@ public:
      *
      * \sa PDU::clone
      */
-    Dot11Authentication *clone() const {
+    Dot11Authentication* clone() const {
         return new Dot11Authentication(*this);
     }
 private:
-    struct AuthBody {
+    struct dot11_auth_body {
         uint16_t auth_algorithm;
         uint16_t auth_seq_number;
         uint16_t status_code;
     };
 
-    uint32_t write_fixed_parameters(uint8_t *buffer, uint32_t total_sz);
+    void write_fixed_parameters(Memory::OutputMemoryStream& stream);
 
-    AuthBody _body;
-
+    dot11_auth_body body_;
 };
 
 /**
  * \brief IEEE 802.11 Deauthentication frame.
  *
  */
-class Dot11Deauthentication : public Dot11ManagementFrame {
+class TINS_API Dot11Deauthentication : public Dot11ManagementFrame {
 public:
     /**
      * \brief This PDU's flag.
@@ -181,8 +188,8 @@ public:
      * \param dst_hw_addr The destination hardware address.
      * \param src_hw_addr The source hardware address.
      */
-    Dot11Deauthentication(const address_type &dst_hw_addr = address_type(), 
-                        const address_type &src_hw_addr = address_type());
+    Dot11Deauthentication(const address_type& dst_hw_addr = address_type(), 
+                          const address_type& src_hw_addr = address_type());
 
     /**
      * \brief Constructs a Dot11Deauthentication object from a buffer 
@@ -198,14 +205,16 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    Dot11Deauthentication(const uint8_t *buffer, uint32_t total_sz);
+    Dot11Deauthentication(const uint8_t* buffer, uint32_t total_sz);
 
     /**
      * \brief Getter for the reason code field.
      *
      * \return The reason code to be set.
      */
-    uint16_t reason_code() const { return Endian::le_to_host(_body.reason_code); }
+    uint16_t reason_code() const {
+        return Endian::le_to_host(body_.reason_code);
+    }
 
     /**
      * \brief Setter for the reason code field.
@@ -226,10 +235,12 @@ public:
      * \brief Getter for the PDU's type.
      * \sa PDU::pdu_type
      */
-    PDUType pdu_type() const { return pdu_flag; }
+    PDUType pdu_type() const {
+        return pdu_flag;
+    }
 
     /**
-     * \brief Check wether this PDU matches the specified flag.
+     * \brief Check whether this PDU matches the specified flag.
      * \param flag The flag to match
      * \sa PDU::matches_flag
      */
@@ -242,19 +253,19 @@ public:
      *
      * \sa PDU::clone
      */
-    Dot11Deauthentication *clone() const {
+    Dot11Deauthentication* clone() const {
         return new Dot11Deauthentication(*this);
     }
 private:
-    struct DeauthBody {
+    struct dot11_deauth_body {
         uint16_t reason_code;
     };
 
-    uint32_t write_fixed_parameters(uint8_t *buffer, uint32_t total_sz);
+    void write_fixed_parameters(Memory::OutputMemoryStream& stream);
 
-    DeauthBody _body;
+    dot11_deauth_body body_;
 };
-} // namespace Tins
 
+} // namespace Tins
 
 #endif // TINS_DOT11_DOT11_AUTH_H

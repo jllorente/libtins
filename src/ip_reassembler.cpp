@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,129 +27,155 @@
  *
  */
 
-#include "ip.h"
-#include "rawpdu.h"
-#include "constants.h"
-#include "internals.h"
-#include "ip_reassembler.h"
+#include <tins/ip.h>
+#include <tins/constants.h>
+#include <tins/ip_reassembler.h>
+#include <tins/detail/pdu_helpers.h>
+
+using std::make_pair;
 
 namespace Tins {
 namespace Internals {
+
 IPv4Stream::IPv4Stream() 
-: received_end(false), received_size(), total_size() 
-{ 
+: received_size_(), total_size_(), received_end_(false) {
 
 }
 
-void IPv4Stream::add_fragment(IP *ip) {
-    fragments_type::iterator it = fragments.begin();
-    uint16_t offset = extract_offset(ip);
-    while(it != fragments.end() && offset > it->offset()) {
+void IPv4Stream::add_fragment(IP* ip) {
+    const uint16_t offset = extract_offset(ip);
+    fragments_type::iterator it = fragments_.begin();
+    while (it != fragments_.end() && offset > it->offset()) {
         ++it;
     }
     // No duplicates plx
-    if(it != fragments.end() && it->offset() == offset) 
+    if (it != fragments_.end() && it->offset() == offset) {
         return;
-    fragments.insert(it, IPv4Fragment(ip->inner_pdu(), offset));
-    received_size += ip->inner_pdu()->size();
-    if(!extract_more_frag(ip)) {
-        total_size = offset + ip->inner_pdu()->size();
-        received_end = true;
     }
-    if(offset == 0)
-        transport_proto = ip->protocol();
+    fragments_.insert(it, IPv4Fragment(ip->inner_pdu(), offset));
+    received_size_ += ip->inner_pdu()->size();
+    // If the MF flag is off
+    if ((ip->flags() & IP::MORE_FRAGMENTS) == 0) {
+        total_size_ = offset + ip->inner_pdu()->size();
+        received_end_ = true;
+    }
+    if (offset == 0) {
+        // Release the inner PDU, store this first fragment and restore the inner PDU
+        PDU* inner_pdu = ip->release_inner_pdu();
+        first_fragment_ = *ip;
+        ip->inner_pdu(inner_pdu);
+    }
 }
 
 bool IPv4Stream::is_complete() const {
-    return received_end && received_size == total_size;
+    // If we haven't received the last chunk of we haven't received all the data,
+    // then we're not complete
+    if (!received_end_ || received_size_ != total_size_) {
+        return false;
+    }
+    // Make sure the first fragment has offset 0
+    return fragments_.begin()->offset() == 0;
 }
 
-PDU *IPv4Stream::allocate_pdu() const {
+PDU* IPv4Stream::allocate_pdu() const {
     PDU::serialization_type buffer;
-    buffer.reserve(total_size);
+    buffer.reserve(total_size_);
     // Check if we actually have all the data we need. Otherwise return nullptr;
-    uint16_t expected = 0;
-    for(fragments_type::const_iterator it = fragments.begin(); it != fragments.end(); ++it) {
-        if(expected != it->offset())
+    size_t expected = 0;
+    for (fragments_type::const_iterator it = fragments_.begin(); it != fragments_.end(); ++it) {
+        if (expected != it->offset()) {
             return 0;
-        expected = static_cast<uint16_t>(it->offset() + it->payload().size());
+        }
+        expected = it->offset() + it->payload().size();
         buffer.insert(buffer.end(), it->payload().begin(), it->payload().end());
     }
     return Internals::pdu_from_flag(
-        static_cast<Constants::IP::e>(transport_proto),
-        buffer.empty() ? 0 : &buffer[0],
+        static_cast<Constants::IP::e>(first_fragment_.protocol()),
+        buffer.empty() ? 0 :& buffer[0],
         static_cast<uint32_t>(buffer.size())
     );
 }
 
-uint16_t IPv4Stream::extract_offset(const IP *ip) {
-    return (ip->frag_off() & 0x1fff) * 8;
+const IP& IPv4Stream::first_fragment() const {
+    return first_fragment_;
 }
 
-bool IPv4Stream::extract_more_frag(const IP *ip) {
-    return (ip->frag_off() & 0x2000) != 0;
-}
-} // namespace Internals
-
-IPv4Reassembler::IPv4Reassembler(overlapping_technique technique)
-: technique(technique)
-{
-
+uint16_t IPv4Stream::extract_offset(const IP* ip) {
+    return ip->fragment_offset() * 8;
 }
 
-IPv4Reassembler::packet_status IPv4Reassembler::process(PDU &pdu) {
-    IP *ip = pdu.find_pdu<IP>();
-    if(ip && ip->inner_pdu()) {
+} // Internals
+
+IPv4Reassembler::IPv4Reassembler()
+: technique_(NONE) {
+
+}
+
+IPv4Reassembler::IPv4Reassembler(OverlappingTechnique technique)
+: technique_(technique) {
+
+}
+
+IPv4Reassembler::PacketStatus IPv4Reassembler::process(PDU& pdu) {
+    IP* ip = pdu.find_pdu<IP>();
+    if (ip && ip->inner_pdu()) {
         // There's fragmentation
-        if(ip->is_fragmented()) {
+        if (ip->is_fragmented()) {
             key_type key = make_key(ip);
             // Create it or look it up, it's the same
-            Internals::IPv4Stream &stream = streams[key];
+            Internals::IPv4Stream& stream = streams_[key];
             stream.add_fragment(ip);
-            if(stream.is_complete()) {
-                PDU *pdu = stream.allocate_pdu();
+            if (stream.is_complete()) {
+                PDU* pdu = stream.allocate_pdu();
+                // Use all field values from the first fragment
+                *ip = stream.first_fragment();
+
                 // Erase this stream, since it's already assembled
-                streams.erase(key);
+                streams_.erase(key);
                 // The packet is corrupt
-                if(!pdu)  {
+                if (!pdu) {
                     return FRAGMENTED;
                 }
                 ip->inner_pdu(pdu);
-                ip->frag_off(0);
+                ip->fragment_offset(0);
+                ip->flags(static_cast<IP::Flags>(0));
                 return REASSEMBLED;
             }
-            else
+            else {
                 return FRAGMENTED;
+            }
         }
     }
     return NOT_FRAGMENTED;
 }
 
-IPv4Reassembler::key_type IPv4Reassembler::make_key(const IP *ip) const {
-    return std::make_pair(
+IPv4Reassembler::key_type IPv4Reassembler::make_key(const IP* ip) const {
+    return make_pair(
         ip->id(),
         make_address_pair(ip->src_addr(), ip->dst_addr())
     );
 }
 
 IPv4Reassembler::address_pair IPv4Reassembler::make_address_pair(IPv4Address addr1, IPv4Address addr2) const {
-    if(addr1 < addr2)
-        return std::make_pair(addr1, addr2);
-    else
-        return std::make_pair(addr2, addr1);
+    if (addr1 < addr2) {
+        return make_pair(addr1, addr2);
+    }
+    else {
+        return make_pair(addr2, addr1);
+    }
 }
 
 void IPv4Reassembler::clear_streams() {
-    streams.clear();
+    streams_.clear();
 }
 
 void IPv4Reassembler::remove_stream(uint16_t id, IPv4Address addr1, IPv4Address addr2) {
-    streams.erase(
-        std::make_pair(
+    streams_.erase(
+        make_pair(
             id, 
             make_address_pair(addr1, addr2)
         )
     );
 }
 
-} // namespace Tins
+} // Tins

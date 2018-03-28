@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -36,7 +36,7 @@
 namespace Tins {
 class value_too_large : public std::exception {
 public:
-    const char *what() const throw() {
+    const char* what() const throw() {
         return "Value is too large";
     }
 };
@@ -112,8 +112,9 @@ public:
      * \param val The parameter from which to copy construct.
      */
     small_uint(repr_type val) {
-        if(val > max_value)
+        if (val > max_value) {
             throw value_too_large();
+        }
         value = val;
     }
     
@@ -127,5 +128,6 @@ private:
     repr_type value;
 };
 
-} // namespace Tins
+} // Tins
+
 #endif // TINS_SMALL_UINT_H

@@ -1,18 +1,18 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
  * met:
- * 
+ *
  * * Redistributions of source code must retain the above copyright
  *   notice, this list of conditions and the following disclaimer.
  * * Redistributions in binary form must reproduce the above
  *   copyright notice, this list of conditions and the following disclaimer
  *   in the documentation and/or other materials provided with the
  *   distribution.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -30,10 +30,10 @@
 #ifndef TINS_ADDRESS_RANGE
 #define TINS_ADDRESS_RANGE
 
-#include <stdexcept>
 #include <iterator>
-#include "endianness.h"
-#include "internals.h"
+#include <tins/endianness.h>
+#include <tins/exceptions.h>
+#include <tins/detail/address_helpers.h>
 
 namespace Tins {
 /**
@@ -53,9 +53,8 @@ public:
      *
      * \param first The address held by this iterator.
      */
-    AddressRangeIterator(const value_type &addr)
-    : addr(addr), reached_end(false)
-    {
+    AddressRangeIterator(const value_type& address)
+    : address_(address), reached_end_(false) {
 
     }
 
@@ -64,24 +63,23 @@ public:
      *
      * \param first The address held by this iterator.
      */
-    AddressRangeIterator(const value_type &address, end_iterator)
-    : addr(address)
-    {
-        reached_end = Internals::increment(addr);
+    AddressRangeIterator(const value_type& address, end_iterator)
+    : address_(address) {
+        reached_end_ = Internals::increment(address_);
     }
 
     /**
      * Retrieves the current address pointed by this iterator.
      */
     const value_type& operator*() const {
-        return addr;
+        return address_;
     }
 
     /**
      * Retrieves a pointer to the current address pointed by this iterator.
      */
     const value_type* operator->() const {
-        return &addr;
+        return& address_;
     }
 
     /**
@@ -89,8 +87,8 @@ public:
      *
      * \param rhs The iterator with which to compare.
      */
-    bool operator==(const AddressRangeIterator &rhs) const {
-        return reached_end == rhs.reached_end && addr == rhs.addr;
+    bool operator==(const AddressRangeIterator& rhs) const {
+        return reached_end_ == rhs.reached_end_ && address_ == rhs.address_;
     }
 
     /**
@@ -98,7 +96,7 @@ public:
      *
      * \param rhs The iterator with which to compare.
      */
-    bool operator!=(const AddressRangeIterator &rhs) const {
+    bool operator!=(const AddressRangeIterator& rhs) const {
         return !(*this == rhs);
     }
 
@@ -106,8 +104,8 @@ public:
      * Increments this iterator.
      */
     AddressRangeIterator& operator++() {
-        reached_end = Internals::increment(addr);
-        return *this;
+        reached_end_ = Internals::increment(address_);
+        return* this;
     }
 
     /**
@@ -119,47 +117,47 @@ public:
         return copy;
     }
 private:
-    Address addr;
-    bool reached_end;
+    Address address_;
+    bool reached_end_;
 };
 
 /**
  * \brief Represents a range of addresses.
  *
  * This class provides a begin()/end() interface which allows
- * iterating through every address stored in it. 
+ * iterating through every address stored in it.
  *
  * Note that when iterating a range that was created using
- * operator/(IPv4Address, int) and the analog for IPv6, the 
+ * operator/(IPv4Address, int) and the analog for IPv6, the
  * network and broadcast addresses are discarded:
  *
  * \code
  * auto range = IPv4Address("192.168.5.0") / 24;
- * for(const auto &addr : range) {
+ * for(const auto& addr : range) {
  *     // process 192.168.5.1-254, .0 and .255 are discarded
  *     process(addr);
  * }
  *
  * // That's only valid for iteration, not for AddressRange<>::contains
- * 
+ *
  * assert(range.contains("192.168.5.0")); // works
  * assert(range.contains("192.168.5.255")); // works
  * \endcode
  *
- * Ranges created using AddressRange(address_type, address_type) 
+ * Ranges created using AddressRange(address_type, address_type)
  * will allow the iteration over the entire range:
  *
  * \code
  * AddressRange<IPv4Address> range("192.168.5.0", "192.168.5.255");
- * for(const auto &addr : range) {
+ * for(const auto& addr : range) {
  *     // process 192.168.5.0-255, no addresses are discarded
  *     process(addr);
  * }
- * 
+ *
  * assert(range.contains("192.168.5.0")); // still valid
  * assert(range.contains("192.168.5.255")); // still valid
  * \endcode
- * 
+ *
  */
 template<typename Address>
 class AddressRange {
@@ -188,20 +186,20 @@ public:
      * The range will consist of the addresses [first, last].
      *
      * If only_hosts is true, then the network and broadcast addresses
-     * will not be available when iterating the range. 
+     * will not be available when iterating the range.
      *
      * If last < first, an std::runtime_error exception is thrown.
-     * 
+     *
      * \param first The first address in the range.
      * \param last The last address(inclusive) in the range.
      * \param only_hosts Indicates whether only host addresses
      * should be accessed when using iterators.
      */
-    AddressRange(const address_type &first, const address_type &last, bool only_hosts = false)
-    : first(first), last(last), only_hosts(only_hosts)
-    {
-        if(last < first)
-            throw std::runtime_error("Invalid address range");
+    AddressRange(const address_type& first, const address_type& last, bool only_hosts = false)
+    : first_(first), last_(last), only_hosts_(only_hosts){
+        if (last_ < first_) {
+            throw exception_base("Invalid address range");
+        }
     }
 
     /**
@@ -211,10 +209,10 @@ public:
      * \param first The base address.
      * \param mask The network mask to be used.
      */
-    static AddressRange from_mask(const address_type &first, const address_type &mask) {
+    static AddressRange from_mask(const address_type& first, const address_type& mask) {
         return AddressRange<address_type>(
-            first, 
-            Internals::last_address_from_mask(first, mask), 
+            first & mask,
+            Internals::last_address_from_mask(first, mask),
             true
         );
     }
@@ -224,8 +222,8 @@ public:
      * \param addr The address to test.
      * \return a bool indicating whether the address is in the range.
      */
-    bool contains(const address_type &addr) const {
-        return (first < addr && addr < last) || addr == first || addr == last;
+    bool contains(const address_type& addr) const {
+        return (first_ < addr && addr < last_) || addr == first_ || addr == last_;
     }
 
     /**
@@ -233,9 +231,10 @@ public:
      * \brief const_iterator pointing to the beginning of this range.
      */
     const_iterator begin() const {
-        address_type addr = first;
-        if(only_hosts)
+        address_type addr = first_;
+        if (only_hosts_) {
             Internals::increment(addr);
+        }
         return const_iterator(addr);
     }
 
@@ -244,43 +243,46 @@ public:
      * \brief const_iterator pointing to the end of this range.
      */
     const_iterator end() const {
-        address_type addr = last;
-        if(only_hosts)
+        address_type addr = last_;
+        if (only_hosts_) {
             Internals::decrement(addr);
+        }
         return const_iterator(addr, typename const_iterator::end_iterator());
     }
 
     /**
      * \brief Indicates whether this range is iterable.
      *
-     * Iterable ranges are those for which there is at least one 
+     * Iterable ranges are those for which there is at least one
      * address that could represent a host. For IPv4 ranges, a /31 or
      * /32 ranges does not contain any, therefore it's not iterable.
      * The same is true for /127 and /128 IPv6 ranges.
      *
      * If is_iterable returns false for a range, then iterating it
-     * through the iterators returned by begin() and end() is 
-     * undefined. 
-     * 
+     * through the iterators returned by begin() and end() is
+     * undefined.
+     *
      * \return bool indicating whether this range is iterable.
      */
     bool is_iterable() const {
         // Since first < last, it's iterable
-        if(!only_hosts)
+        if (!only_hosts_) {
             return true;
+        }
         // We need that distance(first, last) >= 4
-        address_type addr(first);
-        for(int i = 0; i < 3; ++i) {
+        address_type addr(first_);
+        for (int i = 0; i < 3; ++i) {
             // If there's overflow before the last iteration, we're done
-            if(Internals::increment(addr) && i != 2)
+            if (Internals::increment(addr) && i != 2) {
                 return false;
+            }
         }
         // If addr <= last, it's OK.
-        return addr < last || addr == last;
+        return addr < last_ || addr == last_;
     }
 private:
-    address_type first, last;
-    bool only_hosts;
+    address_type first_, last_;
+    bool only_hosts_;
 };
 
 /**
@@ -299,12 +301,13 @@ typedef AddressRange<IPv6Address> IPv6Range;
  * \param mask The bit-length of the prefix.
  */
 template<size_t n>
-AddressRange<HWAddress<n> > operator/(const HWAddress<n> &addr, int mask) {
-    if(mask > 48)
+AddressRange<HWAddress<n> > operator/(const HWAddress<n>& addr, int mask) {
+    if (mask > 48) {
         throw std::logic_error("Prefix length cannot exceed 48");
+    }
     HWAddress<n> last_addr;
     typename HWAddress<n>::iterator it = last_addr.begin();
-    while(mask > 8) {
+    while (mask > 8) {
         *it = 0xff;
         ++it;
         mask -= 8;
@@ -318,14 +321,14 @@ AddressRange<HWAddress<n> > operator/(const HWAddress<n> &addr, int mask) {
  * \param addr The range's first address.
  * \param mask The bit-length of the prefix.
  */
-IPv6Range operator/(const IPv6Address &addr, int mask);
+IPv6Range operator/(const IPv6Address& addr, int mask);
 
 /**
  * \brief Constructs an IPv4Range from a base IPv4Address and a mask.
  * \param addr The range's first address.
  * \param mask The bit-length of the prefix.
  */
-IPv4Range operator/(const IPv4Address &addr, int mask);
+IPv4Range operator/(const IPv4Address& addr, int mask);
 } // namespace Tins
 
 #endif // TINS_ADDRESS_RANGE

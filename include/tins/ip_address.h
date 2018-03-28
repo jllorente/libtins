@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,16 +31,18 @@
 #define TINS_IPADDRESS_H
 
 #include <string>
-#include <iostream>
+#include <iosfwd>
+#include <functional>
 #include <stdint.h>
-#include "cxxstd.h"
+#include <tins/cxxstd.h>
+#include <tins/macros.h>
 
 namespace Tins {
 /**
  * \class IPv4Address
  * \brief Abstraction of an IPv4 address.
  */
-class IPv4Address {
+class TINS_API IPv4Address {
 public:
     /**
      * The address size.
@@ -53,6 +55,13 @@ public:
     static const IPv4Address broadcast;
 
     /**
+     * \brief Constructs an IPv4 address from a prefix length
+     *
+     * \param prefix_length The length of the prefix
+     */
+    static IPv4Address from_prefix_length(uint32_t prefix_length);
+
+    /**
      * \brief Constructor taking a const char*.
      * 
      * Constructs an IPv4Address from a dotted-notation address 
@@ -62,7 +71,7 @@ public:
      * 
      * \param ip const char* containing the dotted-notation address.
      */
-    IPv4Address(const char *ip = 0);
+    IPv4Address(const char* ip = 0);
     
     /**
      * \brief Constructor taking a std::string.
@@ -71,7 +80,7 @@ public:
      * 
      * \param ip std::string containing the dotted-notation address.
      */
-    IPv4Address(const std::string &ip);
+    IPv4Address(const std::string& ip);
     
     /**
      * \brief Constructor taking a IP address represented as a
@@ -101,8 +110,8 @@ public:
      * \param rhs The address to be compared.
      * \return bool indicating whether this address equals rhs.
      */
-    bool operator==(const IPv4Address &rhs) const {
-        return ip_addr == rhs.ip_addr;
+    bool operator==(const IPv4Address& rhs) const {
+        return ip_addr_ == rhs.ip_addr_;
     }
     
     /**
@@ -112,7 +121,7 @@ public:
      * \return bool indicating whether this address is distinct 
      * from rhs.
      */
-    bool operator!=(const IPv4Address &rhs) const {
+    bool operator!=(const IPv4Address& rhs) const {
         return !(*this == rhs);
     }
     
@@ -122,9 +131,17 @@ public:
      * \param rhs The address to be compared.
      * \return bool indicating whether this address is less-than rhs.
      */
-    bool operator< (const IPv4Address &rhs) const {
-        return ip_addr < rhs.ip_addr;
+    bool operator<(const IPv4Address& rhs) const {
+        return ip_addr_ < rhs.ip_addr_;
     }
+
+    /**
+     * \brief Apply a mask to this address
+     * 
+     * \param mask The mask to be applied
+     * \return The result of applying the mask to this address
+     */
+    IPv4Address operator&(const IPv4Address& mask) const;
     
     /**
      * \brief Returns true if this is a private IPv4 address.
@@ -164,6 +181,15 @@ public:
      * \brief Returns true if this is a broadcast IPv4 address.
      */
     bool is_broadcast() const;
+
+    /**
+     * \brief Returns the size of an IPv4 Address.
+     *
+     * This returns the value of IPv4Address::address_size
+     */
+    size_t size() const {
+        return address_size;
+    }
     
     /**
      * \brief Writes this address to a std::ostream.
@@ -175,25 +201,28 @@ public:
      * \param addr The IPv4Address to be written.
      * \return std::stream& pointing to output.
      */
-    friend std::ostream &operator<<(std::ostream &output, const IPv4Address &addr);
+    TINS_API friend std::ostream& operator<<(std::ostream& output, const IPv4Address& addr);
 private:
     uint32_t ip_to_int(const char* ip);
 
-    uint32_t ip_addr;
+    uint32_t ip_addr_;
 };
-} //namespace Tins
+
+} // Tins
 
 #if TINS_IS_CXX11
-namespace std
-{
+namespace std {
+
 template<>
 struct hash<Tins::IPv4Address> {
-    size_t operator()(const Tins::IPv4Address &addr) const {
-        return std::hash<uint32_t>()(addr);
+    size_t operator()(const Tins::IPv4Address& addr) const
+    {
+        return std::hash<std::uint32_t>()(addr);
     }
 };
-} // namespace std
-#endif
 
+} // std
+
+#endif // TINS_IS_CXX11
 
 #endif // TINS_IPADDRESS_H

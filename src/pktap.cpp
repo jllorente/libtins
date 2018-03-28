@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,35 +27,34 @@
  *
  */
 
-#include <stdexcept>
 #include <cstring>
-#include "exceptions.h"
-#include "pktap.h"
-#include "internals.h"
+#include <tins/exceptions.h>
+#include <tins/pktap.h>
+#include <tins/exceptions.h>
+#include <tins/memory_helpers.h>
+#include <tins/detail/pdu_helpers.h>
+
+using Tins::Memory::InputMemoryStream;
 
 namespace Tins {
 
-PKTAP::PKTAP() {
-    memset(&header_, 0, sizeof(header_));
+PKTAP::PKTAP() : header_() {
 }
 
 PKTAP::PKTAP(const uint8_t* buffer, uint32_t total_sz) {
-    if (total_sz < sizeof(pktap_header)) {
-        throw malformed_packet();
-    }
-    memcpy(&header_, buffer, sizeof(header_));
+    InputMemoryStream stream(buffer, total_sz);
+    stream.read(header_);
     uint32_t header_length = header_.length;
-    if (header_length > total_sz) {
+    if (header_length > total_sz || header_length < sizeof(header_)) {
         throw malformed_packet();
     }
-    buffer += header_length;
-    total_sz -= header_length;
-    if (header_.next && total_sz > 0) {
+    stream.skip(header_length - sizeof(header_));
+    if (header_.next && stream) {
         inner_pdu(
             Internals::pdu_from_dlt_flag(
                 header_.dlt, 
-                buffer, 
-                total_sz
+                stream.pointer(), 
+                stream.size()
             )
         );
     }
@@ -65,8 +64,8 @@ uint32_t PKTAP::header_size() const {
     return sizeof(header_);
 }
 
-void PKTAP::write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *parent) {
-    throw std::runtime_error("PKTAP cannot be serialized");
+void PKTAP::write_serialization(uint8_t* /*buffer*/, uint32_t /*total_sz*/) {
+    throw pdu_not_serializable();
 }
 
 } // Tins

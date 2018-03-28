@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,19 +31,25 @@
 #define TINS_DHCPV6_H
 
 #include <cstring>
-#include <list>
-#include "pdu.h"
-#include "endianness.h"
-#include "small_uint.h"
-#include "ipv6_address.h"
-#include "pdu_option.h"
+#include <tins/pdu.h>
+#include <tins/macros.h>
+#include <tins/endianness.h>
+#include <tins/small_uint.h>
+#include <tins/ipv6_address.h>
+#include <tins/pdu_option.h>
 
-namespace Tins {    
+namespace Tins {
+namespace Memory  {
+
+class OutputMemoryStream;
+
+} // Memory
+
 /**
  * \class DHCPv6
  * \brief Represents a DHCPv6 PDU.
  */
-class DHCPv6 : public PDU {
+class TINS_API DHCPv6 : public PDU {
 public:
     /**
      * Represents a DHCPv6 option. 
@@ -156,7 +162,7 @@ public:
     /**
      * The type used to store the DHCPv6 options.
      */
-    typedef std::list<option> options_type;
+    typedef std::vector<option> options_type;
 
     /**
      * The type used to store IP addresses.
@@ -182,7 +188,7 @@ public:
           const options_type& options = options_type())
         : id(id), t1(t1), t2(t2), options(options) {}
 
-        static ia_na_type from_option(const option &opt);
+        static ia_na_type from_option(const option& opt);
     };
     
     /**
@@ -199,7 +205,7 @@ public:
           const options_type& options = options_type())
         : id(id), options(options) {}
 
-        static ia_ta_type from_option(const option &opt);
+        static ia_ta_type from_option(const option& opt);
     };
 
     /**
@@ -218,7 +224,7 @@ public:
         : address(address), preferred_lifetime(preferred_lifetime), 
           valid_lifetime(valid_lifetime), options(options) {}
 
-        static ia_address_type from_option(const option &opt);
+        static ia_address_type from_option(const option& opt);
     };
     
     /**
@@ -233,11 +239,11 @@ public:
         
         authentication_type(uint8_t protocol = 0, uint8_t algorithm = 0,
           uint8_t rdm = 0, uint64_t replay_detection = 0,
-          const auth_info_type &auth_info = auth_info_type())
+          const auth_info_type& auth_info = auth_info_type())
         : protocol(protocol), algorithm(algorithm), rdm(rdm),
         replay_detection(replay_detection), auth_info(auth_info) {}
 
-        static authentication_type from_option(const option &opt);
+        static authentication_type from_option(const option& opt);
     };
     
     /**
@@ -247,10 +253,10 @@ public:
         uint16_t code;
         std::string message;
         
-        status_code_type(uint16_t code = 0, const std::string &message = "")
+        status_code_type(uint16_t code = 0, const std::string& message = "")
         : code(code), message(message) { }
 
-        static status_code_type from_option(const option &opt);
+        static status_code_type from_option(const option& opt);
     };
     
     /**
@@ -263,10 +269,10 @@ public:
         data_type data;
         
         vendor_info_type(uint32_t enterprise_number = 0, 
-          const data_type &data = data_type())
+          const data_type& data = data_type())
         : enterprise_number(enterprise_number), data(data) { }
 
-        static vendor_info_type from_option(const option &opt);
+        static vendor_info_type from_option(const option& opt);
     };
     
     
@@ -283,13 +289,10 @@ public:
         typedef std::vector<class_option_data_type> data_type;
         data_type data;
 
-        user_class_type(const data_type &data = data_type())
-        : data(data)
-        {
+        user_class_type(const data_type& data = data_type())
+        : data(data) { }
 
-        }
-
-        static user_class_type from_option(const option &opt);
+        static user_class_type from_option(const option& opt);
     };
     
     /**
@@ -302,11 +305,11 @@ public:
         class_data_type vendor_class_data;
         
         vendor_class_type(uint32_t enterprise_number = 0, 
-          const class_data_type &vendor_class_data = class_data_type())
+          const class_data_type& vendor_class_data = class_data_type())
         : enterprise_number(enterprise_number), 
         vendor_class_data(vendor_class_data) { }
 
-        static vendor_class_type from_option(const option &opt);
+        static vendor_class_type from_option(const option& opt);
     };
     
     /**
@@ -322,12 +325,12 @@ public:
         lladdress_type lladdress;
         
         duid_llt(uint16_t hw_type = 0, uint32_t time = 0,
-          const lladdress_type &lladdress = lladdress_type())
+          const lladdress_type& lladdress = lladdress_type())
         : hw_type(hw_type), time(time), lladdress(lladdress) {}
         
         PDU::serialization_type serialize() const;
         
-        static duid_llt from_bytes(const uint8_t *buffer, uint32_t total_sz);
+        static duid_llt from_bytes(const uint8_t* buffer, uint32_t total_sz);
     };
     
     /**
@@ -341,12 +344,12 @@ public:
         identifier_type identifier;
         
         duid_en(uint32_t enterprise_number = 0,
-          const identifier_type &identifier = identifier_type())
+          const identifier_type& identifier = identifier_type())
         : enterprise_number(enterprise_number), identifier(identifier) {}
         
         PDU::serialization_type serialize() const;
         
-        static duid_en from_bytes(const uint8_t *buffer, uint32_t total_sz);
+        static duid_en from_bytes(const uint8_t* buffer, uint32_t total_sz);
     };
     
     /**
@@ -360,12 +363,12 @@ public:
         lladdress_type lladdress;
         
         duid_ll(uint16_t hw_type = 0, 
-          const lladdress_type &lladdress = lladdress_type())
+          const lladdress_type& lladdress = lladdress_type())
         : hw_type(hw_type), lladdress(lladdress) {}
         
         PDU::serialization_type serialize() const;
         
-        static duid_ll from_bytes(const uint8_t *buffer, uint32_t total_sz);
+        static duid_ll from_bytes(const uint8_t* buffer, uint32_t total_sz);
     };
     
     /**
@@ -378,19 +381,19 @@ public:
         uint16_t id;
         data_type data;
         
-        duid_type(uint16_t id = 0, const data_type &data = data_type())
+        duid_type(uint16_t id = 0, const data_type& data = data_type())
         : id(id), data(data) {}
         
-        duid_type(const duid_llt &identifier)
+        duid_type(const duid_llt& identifier)
         : id(duid_llt::duid_id), data(identifier.serialize()) {}
         
-        duid_type(const duid_en &identifier)
+        duid_type(const duid_en& identifier)
         : id(duid_en::duid_id), data(identifier.serialize()) {}
         
-        duid_type(const duid_ll &identifier)
-        : id(duid_en::duid_id), data(identifier.serialize()) {}
+        duid_type(const duid_ll& identifier)
+        : id(duid_ll::duid_id), data(identifier.serialize()) {}
 
-        static duid_type from_option(const option &opt);
+        static duid_type from_option(const option& opt);
     };
         
     /**
@@ -409,6 +412,14 @@ public:
     typedef std::vector<uint8_t> interface_id_type;
 
     /**
+     * \brief Extracts metadata for this protocol based on the buffer provided
+     *
+     * \param buffer Pointer to a buffer
+     * \param total_sz Size of the buffer pointed by buffer
+     */
+    static metadata extract_metadata(const uint8_t *buffer, uint32_t total_sz);
+
+    /**
      * Default constructor.
      */
     DHCPv6();
@@ -423,7 +434,7 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    DHCPv6(const uint8_t *buffer, uint32_t total_sz);
+    DHCPv6(const uint8_t* buffer, uint32_t total_sz);
 
     // Getters
     
@@ -433,7 +444,7 @@ public:
      * \return The stored message type field.
      */
     MessageType msg_type() const { 
-        return static_cast<MessageType>(header_data[0]); 
+        return static_cast<MessageType>(header_data_[0]); 
     }
     
     /**
@@ -441,7 +452,9 @@ public:
      *
      * \return The stored hop count field.
      */
-    uint8_t hop_count() const { return header_data[1]; }
+    uint8_t hop_count() const {
+        return header_data_[1];
+    }
     
     /**
      * \brief Getter for the transaction id field.
@@ -449,7 +462,7 @@ public:
      * \return The stored transaction id field.
      */
     small_uint<24> transaction_id() const { 
-        return (header_data[1] << 16) | (header_data[2] << 8) | header_data[3];
+        return (header_data_[1] << 16) | (header_data_[2] << 8) | header_data_[3];
     }
 
     /**
@@ -457,21 +470,27 @@ public:
      *
      * \return The stored peer address field.
      */
-    const ipaddress_type &peer_address() const { return peer_addr; }
+    const ipaddress_type& peer_address() const {
+        return peer_addr_;
+    }
     
     /**
      * \brief Getter for the link address field.
      *
      * \return The stored link address field.
      */
-    const ipaddress_type &link_address() const { return link_addr; }
+    const ipaddress_type& link_address() const {
+        return link_addr_;
+    }
     
     /**
      * \brief Getter for the DHCPv6 options.
      *
      * \return The stored options.
      */
-    const options_type &options() const { return options_; }
+    const options_type& options() const {
+        return options_;
+    }
 
     // Setters
     /**
@@ -500,14 +519,14 @@ public:
      *
      * \param count The new peer address.
      */
-    void peer_address(const ipaddress_type &addr);
+    void peer_address(const ipaddress_type& addr);
     
     /**
      * \brief Setter for the link address field.
      *
      * \param count The new link address.
      */
-    void link_address(const ipaddress_type &addr);
+    void link_address(const ipaddress_type& addr);
     
     // Option getters
     
@@ -673,7 +692,7 @@ public:
      * 
      * \param value The new IA_NA option data.
      */
-    void ia_na(const ia_na_type &value);
+    void ia_na(const ia_na_type& value);
     
     /**
      * \brief Setter for the Identity Association for Temporary
@@ -681,21 +700,21 @@ public:
      * 
      * \param value The new IA_TA option data.
      */
-    void ia_ta(const ia_ta_type &value);
+    void ia_ta(const ia_ta_type& value);
     
     /**
      * \brief Setter for the Identity Association Address option.
      * 
      * \param value The new IA Address option data.
      */
-    void ia_address(const ia_address_type &value);
+    void ia_address(const ia_address_type& value);
     
     /**
      * \brief Setter for the Identity Association Address option.
      * 
      * \param value The new Option Request option data.
      */
-    void option_request(const option_request_type &value);
+    void option_request(const option_request_type& value);
     
     /**
      * \brief Setter for the Preference option.
@@ -716,28 +735,28 @@ public:
      * 
      * \param value The new Relay Message option data.
      */
-    void relay_message(const relay_msg_type &value);
+    void relay_message(const relay_msg_type& value);
     
     /**
      * \brief Setter for the Authentication option.
      * 
      * \param value The new Authentication option data.
      */
-    void authentication(const authentication_type &value);
+    void authentication(const authentication_type& value);
     
     /**
      * \brief Setter for the Server Unicast option.
      * 
      * \param value The new Server Unicast option data.
      */
-    void server_unicast(const ipaddress_type &value);
+    void server_unicast(const ipaddress_type& value);
     
     /**
      * \brief Setter for the Status Code option.
      * 
      * \param value The new Status Code option data.
      */
-    void status_code(const status_code_type &value);
+    void status_code(const status_code_type& value);
     
     /**
      * \brief Adds a Rapid Commit option.
@@ -749,28 +768,28 @@ public:
      * 
      * \param value The new User Class option data.
      */
-    void user_class(const user_class_type &value);
+    void user_class(const user_class_type& value);
     
     /**
      * \brief Setter for the Vendor Class option.
      * 
      * \param value The new Vendor Class option data.
      */
-    void vendor_class(const vendor_class_type &value);
+    void vendor_class(const vendor_class_type& value);
     
     /**
      * \brief Setter for the Vendor-specific Information option.
      * 
      * \param value The new Vendor-specific Information option data.
      */
-    void vendor_info(const vendor_info_type &value);
+    void vendor_info(const vendor_info_type& value);
     
     /**
      * \brief Setter for the Interface ID option.
      * 
      * \param value The new Interface ID option data.
      */
-    void interface_id(const interface_id_type &value);
+    void interface_id(const interface_id_type& value);
     
     /**
      * \brief Setter for the Reconfigure Message option.
@@ -789,14 +808,14 @@ public:
      * 
      * \param value The new Client Identifier option data.
      */
-    void client_id(const duid_type &value);
+    void client_id(const duid_type& value);
     
     /**
      * \brief Setter for the Server Identifier option.
      * 
      * \param value The new Server Identifier option data.
      */
-    void server_id(const duid_type &value);
+    void server_id(const duid_type& value);
     
     // Other stuff
     
@@ -813,7 +832,7 @@ public:
      * 
      * \param opt The option to be added
      */
-    void add_option(const option &opt);
+    void add_option(const option& opt);
     
     /**
      * \brief Removes a DHCPv6 option.
@@ -835,108 +854,70 @@ public:
      * 
      * \param type The option identifier to be searched.
      */
-    const option *search_option(OptionTypes type) const;
+    const option* search_option(OptionTypes type) const;
 
     // PDU stuff
     
     /**
      * \brief Returns the header size.
      *
-     * This metod overrides PDU::header_size. \sa PDU::header_size
+     * This method overrides PDU::header_size. \sa PDU::header_size
      */
     uint32_t header_size() const;
     
         /** 
-     * \brief Check wether ptr points to a valid response for this PDU.
+     * \brief Check whether ptr points to a valid response for this PDU.
      *
      * \sa PDU::matches_response
      * \param ptr The pointer to the buffer.
      * \param total_sz The size of the buffer.
      */
-    bool matches_response(const uint8_t *ptr, uint32_t total_sz) const;
+    bool matches_response(const uint8_t* ptr, uint32_t total_sz) const;
     
     /**
      * \brief Getter for the PDU's type.
      * \sa PDU::pdu_type
      */
-    PDUType pdu_type() const { return pdu_flag; }
+    PDUType pdu_type() const { 
+        return pdu_flag;
+    }
     
     /**
      * \sa PDU::clone
      */
-    DHCPv6 *clone() const {
+    DHCPv6* clone() const {
         return new DHCPv6(*this);
     }
 private:
-    void write_serialization(uint8_t *buffer, uint32_t total_sz, const PDU *);
-    uint8_t* write_option(const option &option, uint8_t* buffer) const;
+    void write_serialization(uint8_t* buffer, uint32_t total_sz);
+    void write_option(const option& option, Memory::OutputMemoryStream& stream) const;
     options_type::const_iterator search_option_iterator(OptionTypes type) const;
     options_type::iterator search_option_iterator(OptionTypes type);
     
-    template<template <typename> class Functor>
-    const option *safe_search_option(OptionTypes opt, uint32_t size) const {
-        const option *option = search_option(opt);
-        if(!option || Functor<uint32_t>()(option->data_size(), size))
+    template <template <typename> class Functor>
+    const option* safe_search_option(OptionTypes opt, uint32_t size) const {
+        const option* option = search_option(opt);
+        if (!option || Functor<uint32_t>()(option->data_size(), size)) {
             throw option_not_found();
+        }
         return option;
     }
 
     template<typename T>
     T search_and_convert(OptionTypes opt) const {
-        const option *option = search_option(opt);
-        if(!option)
+        const option* option = search_option(opt);
+        if (!option) {
             throw option_not_found();
+        }
         return option->to<T>();
     }
 
-    uint8_t header_data[4];
-    uint32_t options_size;
-    ipaddress_type link_addr, peer_addr;
+    uint8_t header_data_[4];
+    uint32_t options_size_;
+    ipaddress_type link_addr_, peer_addr_;
     options_type options_;
-};   
+};
 
-namespace Internals {
-template<typename InputIterator>
-void class_option_data2option(InputIterator start, InputIterator end, 
-  std::vector<uint8_t>& buffer, size_t start_index = 0) 
-{
-    size_t index = start_index;
-    uint16_t uint16_t_buffer;
-    while(start != end) {
-        buffer.resize(buffer.size() + sizeof(uint16_t) + start->size());
-        uint16_t_buffer = Endian::host_to_be(static_cast<uint16_t>(start->size()));
-        std::memcpy(&buffer[index], &uint16_t_buffer, sizeof(uint16_t));
-        index += sizeof(uint16_t);
-        std::copy(start->begin(), start->end(), buffer.begin() + index);
-        index += start->size();
-        
-        start++;
-    }
-}
-
-template<typename OutputType>
-OutputType option2class_option_data(const uint8_t *ptr, uint32_t total_sz)
-{
-    typedef typename OutputType::value_type value_type;
-    OutputType output;
-    size_t index = 0;
-    while(index + 2 < total_sz) {
-        uint16_t size;
-        std::memcpy(&size, ptr + index, sizeof(uint16_t));
-        size = Endian::be_to_host(size);
-        index += sizeof(uint16_t);
-        if(index + size > total_sz)
-            throw option_not_found();
-        output.push_back(
-            value_type(ptr + index, ptr + index + size)
-        );
-        index += size;
-    }
-    if(index != total_sz)
-        throw malformed_option();
-    return output;
-}
-} 
-}
+} // Tins
 
 #endif // TINS_DHCPV6_H

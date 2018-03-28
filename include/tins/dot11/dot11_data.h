@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, Matias Fontanini
+ * Copyright (c) 2017, Matias Fontanini
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,15 +27,20 @@
  *
  */
 
-#include "../config.h"
+#include <tins/config.h>
 
-#if !defined(TINS_DOT11_DOT11_DATA_H) && defined(HAVE_DOT11)
+#if !defined(TINS_DOT11_DOT11_DATA_H) && defined(TINS_HAVE_DOT11)
 #define TINS_DOT11_DOT11_DATA_H
 
-#include "../dot11/dot11_base.h"
+#include <tins/dot11/dot11_base.h>
+#include <tins/macros.h>
 
 namespace Tins {
-class Dot11Data : public Dot11 {
+
+/**
+ * \brief Represents an IEEE 802.11 data frame
+ */
+class TINS_API Dot11Data : public Dot11 {
 public:
     /**
      * \brief This PDU's flag.
@@ -51,8 +56,8 @@ public:
      * \param dst_hw_addr The destination hardware address.
      * \param src_hw_addr The source hardware address.
      */
-    Dot11Data(const address_type &dst_hw_addr = address_type(), 
-            const address_type &src_hw_addr = address_type());
+    Dot11Data(const address_type& dst_hw_addr = address_type(), 
+              const address_type& src_hw_addr = address_type());
                 
     /**
      * \brief Constructs a Dot11Data object from a buffer and adds 
@@ -68,21 +73,25 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    Dot11Data(const uint8_t *buffer, uint32_t total_sz);
+    Dot11Data(const uint8_t* buffer, uint32_t total_sz);
     
     /**
      * \brief Getter for the second address.
      *
      * \return The stored second address.
      */
-    address_type addr2() const { return _ext_header.addr2; }
+    address_type addr2() const {
+        return ext_header_.addr2;
+    }
 
     /**
      * \brief Getter for the third address.
      *
      * \return The stored third address.
      */
-    address_type addr3() const { return _ext_header.addr3; }
+    address_type addr3() const {
+        return ext_header_.addr3;
+    }
 
     /**
      * \brief Getter for the fragment number field.
@@ -91,9 +100,9 @@ public:
      */
     small_uint<4> frag_num() const { 
         #if TINS_IS_LITTLE_ENDIAN
-        return _ext_header.frag_seq & 0xf; 
+        return ext_header_.frag_seq & 0xf; 
         #else
-        return (_ext_header.frag_seq >> 8) & 0xf; 
+        return (ext_header_.frag_seq >> 8) & 0xf; 
         #endif
     }
 
@@ -104,9 +113,9 @@ public:
      */
     small_uint<12> seq_num() const { 
         #if TINS_IS_LITTLE_ENDIAN
-        return (_ext_header.frag_seq >> 4) & 0xfff; 
+        return (ext_header_.frag_seq >> 4) & 0xfff; 
         #else
-        return (Endian::le_to_host<uint16_t>(_ext_header.frag_seq) >> 4) & 0xfff; 
+        return (Endian::le_to_host<uint16_t>(ext_header_.frag_seq) >> 4) & 0xfff; 
         #endif
     }
 
@@ -115,21 +124,23 @@ public:
      *
      * \return The fourth address.
      */
-    address_type addr4() const { return _addr4; }
+    address_type addr4() const {
+        return addr4_;
+    }
 
     /**
      * \brief Setter for the second address.
      *
      * \param new_addr2 The second address to be set.
      */
-    void addr2(const address_type &new_addr2);
+    void addr2(const address_type& new_addr2);
 
     /**
      * \brief Setter for the third address.
      *
      * \param new_addr3 The third address to be set.
      */
-    void addr3(const address_type &new_addr3);
+    void addr3(const address_type& new_addr3);
 
     /**
      * \brief Setter for the fragment number field.
@@ -150,7 +161,7 @@ public:
      *
      * \param new_addr4 The fourth address to be set.
      */
-    void addr4(const address_type &new_addr4);
+    void addr4(const address_type& new_addr4);
 
     /**
      * \brief Retrieves the frame's source address.
@@ -161,10 +172,12 @@ public:
      * If FromDS == ToDS == 1, the return value is not defined.
      */
     address_type src_addr() const {
-        if(!from_ds() && !to_ds())
+        if (!from_ds() && !to_ds()) {
             return addr2();
-        if(!from_ds() && to_ds())
+        }
+        if (!from_ds() && to_ds()) {
             return addr2();
+        }
         return addr3();
     }
 
@@ -177,10 +190,12 @@ public:
      * If FromDS == ToDS == 1, the return value is not defined.
      */
     address_type dst_addr() const {
-        if(!from_ds() && !to_ds())
+        if (!from_ds() && !to_ds()) {
             return addr1();
-        if(!from_ds() && to_ds())
+        }
+        if (!from_ds() && to_ds()) {
             return addr3();
+        }
         return addr1();
     }
 
@@ -193,10 +208,12 @@ public:
      * If FromDS == ToDS == 1, the return value is not defined.
      */
     address_type bssid_addr() const {
-        if(!from_ds() && !to_ds())
+        if (!from_ds() && !to_ds()) {
             return addr3();
-        if(!from_ds() && to_ds())
+        }
+        if (!from_ds() && to_ds()) {
             return addr1();
+        }
         return addr2();
     }
 
@@ -212,10 +229,12 @@ public:
      * \brief Getter for the PDU's type.
      * \sa PDU::pdu_type
      */
-    PDUType pdu_type() const { return pdu_flag; }
+    PDUType pdu_type() const {
+        return pdu_flag;
+    }
 
     /**
-     * \brief Check wether this PDU matches the specified flag.
+     * \brief Check whether this PDU matches the specified flag.
      * \param flag The flag to match
      * \sa PDU::matches_flag
      */
@@ -228,35 +247,28 @@ public:
      *
      * \sa PDU::clone
      */
-    Dot11Data *clone() const {
+    Dot11Data* clone() const {
         return new Dot11Data(*this);
     }
 protected:
     TINS_BEGIN_PACK
-    struct ExtendedHeader {
+    struct dot11_extended_header {
         uint8_t addr2[address_type::address_size];
         uint8_t addr3[address_type::address_size];
         uint16_t frag_seq;
     } TINS_END_PACK;
     
     struct no_inner_pdu { };
-    Dot11Data(const uint8_t *buffer, uint32_t total_sz, no_inner_pdu);
+    Dot11Data(const uint8_t* buffer, uint32_t total_sz, no_inner_pdu);
 
-    uint32_t init(const uint8_t *buffer, uint32_t total_sz);
-    uint32_t write_ext_header(uint8_t *buffer, uint32_t total_sz);
-
-    uint32_t data_frame_size() { 
-        return static_cast<uint32_t>(
-            Dot11::header_size() + sizeof(_ext_header) + 
-                ((from_ds() && to_ds()) ? _addr4.size() : 0)
-        ); 
-    }
+    uint32_t init(const uint8_t* buffer, uint32_t total_sz);
+    void write_ext_header(Memory::OutputMemoryStream& stream);
 private:
-    ExtendedHeader _ext_header;
-    address_type _addr4;
+    dot11_extended_header ext_header_;
+    address_type addr4_;
 };
 
-class Dot11QoSData : public Dot11Data {
+class TINS_API Dot11QoSData : public Dot11Data {
 public:
     /**
      * \brief This PDU's flag.
@@ -272,8 +284,8 @@ public:
      * \param dst_hw_addr The destination hardware address.
      * \param src_hw_addr The source hardware address.
      */
-    Dot11QoSData(const address_type &dst_hw_addr = address_type(), 
-                const address_type &src_hw_addr = address_type());
+    Dot11QoSData(const address_type& dst_hw_addr = address_type(), 
+                 const address_type& src_hw_addr = address_type());
 
     /**
      * \brief Constructors Dot11QoSData object from a buffer and adds
@@ -289,14 +301,16 @@ public:
      * \param buffer The buffer from which this PDU will be constructed.
      * \param total_sz The total size of the buffer.
      */
-    Dot11QoSData(const uint8_t *buffer, uint32_t total_sz);
+    Dot11QoSData(const uint8_t* buffer, uint32_t total_sz);
     
     /**
      * \brief Getter for the QOS Control field.
      *
      * \return The stored QOS Control field value.
      */
-    uint16_t qos_control() const { return Endian::le_to_host(_qos_control); }
+    uint16_t qos_control() const {
+        return Endian::le_to_host(qos_control_);
+    }
 
     /**
      * \brief Setter for the QOS Control field.
@@ -318,7 +332,7 @@ public:
      *
      * \sa PDU::clone
      */
-    Dot11QoSData *clone() const {
+    Dot11QoSData* clone() const {
         return new Dot11QoSData(*this);
     }
 
@@ -326,21 +340,22 @@ public:
      * \brief Getter for the PDU's type.
      * \sa PDU::pdu_type
      */
-    PDUType pdu_type() const { return PDU::DOT11_QOS_DATA; }
+    PDUType pdu_type() const {
+        return pdu_flag;
+    }
 
     /**
-     * \brief Check wether this PDU matches the specified flag.
+     * \brief Check whether this PDU matches the specified flag.
      * \param flag The flag to match
      * \sa PDU::matches_flag
      */
     bool matches_flag(PDUType flag) const {
-       return flag == PDU::DOT11_QOS_DATA || Dot11Data::matches_flag(flag);
+       return flag == pdu_flag || Dot11Data::matches_flag(flag);
     }
 private:
-    uint32_t write_fixed_parameters(uint8_t *buffer, uint32_t total_sz);
+    void write_fixed_parameters(Memory::OutputMemoryStream& stream);
 
-
-    uint16_t _qos_control;
+    uint16_t qos_control_;
 };
 }
 
